@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /workspace/scratch/060054ac4d22/toolchain/ziglang/zig cc -target x86_64-windows-gnu "$@"

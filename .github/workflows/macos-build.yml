@@ -1,0 +1,75 @@
+name: Build macOS plugins
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "CMakeLists.txt"
+      - "Source/**"
+      - "Assets/**"
+      - "Tests/**"
+      - "scripts/build-macos-installer.sh"
+      - "scripts/validate-macos-build.sh"
+      - ".github/workflows/macos-build.yml"
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "Source/**"
+      - "Assets/**"
+      - "Tests/**"
+      - "scripts/build-macos-installer.sh"
+      - "scripts/validate-macos-build.sh"
+      - ".github/workflows/macos-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Universal VST3 and AU
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 3
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          cmake --version
+
+      - name: Build and run core tests
+        run: |
+          cmake -S . -B build-core \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCCP_FETCH_JUCE=OFF
+          cmake --build build-core --config Release --target chordcode_pro_tests
+          ctest --test-dir build-core -C Release --output-on-failure
+
+      - name: Build universal plugins and unsigned installer
+        run: ./scripts/build-macos-installer.sh
+
+      - name: Validate bundles and Audio Unit
+        env:
+          CCP_REQUIRE_AUVAL: "1"
+        run: ./scripts/validate-macos-build.sh
+
+      - name: Upload macOS test build
+        uses: actions/upload-artifact@v7
+        with:
+          name: chord-code-pro-macos-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            build-macos/ChordCodePro_artefacts/Release/VST3/Chord Code.vst3
+            build-macos/ChordCodePro_artefacts/Release/AU/Chord Code.component
+            dist-macos/*.pkg

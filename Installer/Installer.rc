@@ -1,0 +1,4 @@
+#define RT_MANIFEST 24
+1 RT_MANIFEST "Installer.manifest"
+1 ICON "../Assets/Brand/chord-code-pro.ico"
+201 RCDATA "../build-final3-windows/ChordCodePro_artefacts/Release/VST3/Chord Code Pro.vst3/Contents/x86_64-win/Chord Code Pro.vst3"

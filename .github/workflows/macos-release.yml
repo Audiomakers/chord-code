@@ -1,0 +1,85 @@
+name: Release signed macOS installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version matching CMakeLists.txt, for example 1.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Sign, notarize and publish
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 3
+      CCP_VERSION: ${{ inputs.version }}
+      DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+      DEVELOPER_ID_INSTALLER: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Confirm version and required secrets
+        env:
+          APPLE_CERTIFICATES_P12_BASE64: ${{ secrets.APPLE_CERTIFICATES_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          project_version="$(sed -nE 's/^project\(ChordCodePro VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          if [[ "$project_version" != "$CCP_VERSION" ]]; then
+            echo "Requested version $CCP_VERSION does not match CMake version $project_version" >&2
+            exit 1
+          fi
+          for name in APPLE_CERTIFICATES_P12_BASE64 APPLE_CERTIFICATE_PASSWORD DEVELOPER_ID_APPLICATION DEVELOPER_ID_INSTALLER APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing GitHub secret: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Import Apple certificates
+        env:
+          APPLE_CERTIFICATES_P12_BASE64: ${{ secrets.APPLE_CERTIFICATES_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: ./scripts/import-apple-certificates.sh
+
+      - name: Build, sign and notarize installer
+        run: ./scripts/build-macos-installer.sh
+
+      - name: Validate signed release
+        env:
+          CCP_REQUIRE_AUVAL: "1"
+          CCP_REQUIRE_SIGNED: "1"
+        run: ./scripts/validate-macos-build.sh
+
+      - name: Publish private-repository GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pkg_path="$(find dist-macos -maxdepth 1 -name '*.pkg' -print -quit)"
+          tag="v${CCP_VERSION}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "Chord Code ${CCP_VERSION}" --notes "Build macOS universal: VST3 + Audio Unit."
+          fi
+          gh release upload "$tag" "$pkg_path" --clobber
+
+      - name: Remove temporary signing keychain
+        if: always()
+        run: |
+          if [[ -n "${CCP_KEYCHAIN_PATH:-}" && -f "$CCP_KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$CCP_KEYCHAIN_PATH" || true
+          fi

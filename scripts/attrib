@@ -1,0 +1,3 @@
+#!/bin/sh
+# Cross-build compatibility shim. Native Windows builds use attrib.exe.
+exit 0
