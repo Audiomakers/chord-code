@@ -29,7 +29,7 @@ void addNames(juce::ComboBox& box, Fn fn) {
 
 void label(juce::Graphics& g, const char* text, int x, int y, int width) {
     g.setColour(juce::Colour(textSecondary));
-    g.setFont(labelFont(13.5f));
+    g.setFont(labelFont(16.0f));
     g.drawText(utf(text), x, y, width, 20, juce::Justification::centredLeft);
 }
 
@@ -65,37 +65,142 @@ juce::String chordFileStem(const ccp::Progression& progression) {
     return names.joinIntoString("-").substring(0, 120);
 }
 
-class ChordChoiceMenuItem final : public juce::PopupMenu::CustomComponent {
+// Right-click chord picker: options grouped by scale degree, auditioned on hover.
+class ChordPickerPanel final : public juce::PopupMenu::CustomComponent {
 public:
-    ChordChoiceMenuItem(juce::String text, std::function<void()> onHover)
-        : juce::PopupMenu::CustomComponent(true), title(std::move(text)), hoverAction(std::move(onHover)) {}
+    ChordPickerPanel(int slotIndex, int keyRoot, ccp::Chord currentChord, std::vector<ccp::Chord> options,
+                     std::function<void(const ccp::Chord&)> onHover, std::shared_ptr<int> chosenIndex)
+        : juce::PopupMenu::CustomComponent(false), slot(slotIndex), key(keyRoot), current(std::move(currentChord)),
+          choices(std::move(options)), hoverAction(std::move(onHover)), chosen(std::move(chosenIndex)) {
+        for (size_t i = 0; i < choices.size(); ++i) {
+            if (rows.empty() || rows.back().degree != choices[i].degree) rows.push_back({ choices[i].degree, {}, {} });
+            rows.back().items.push_back((int) i);
+        }
+        layout();
+    }
 
-    void getIdealSize(int& width, int& height) override { width = 230; height = 32; }
+    void getIdealSize(int& width, int& height) override { width = panelWidth; height = totalHeight; }
 
     void paint(juce::Graphics& g) override {
-        if (highlighted) {
-            auto r = getLocalBounds().toFloat().reduced(4.0f, 2.0f);
+        auto bounds = getLocalBounds().toFloat();
+        g.setColour(juce::Colour(surface));
+        g.fillRect(bounds);
+
+        auto header = bounds.removeFromTop((float) headerHeight).reduced(16.0f, 0.0f);
+        g.setColour(juce::Colour(textSecondary));
+        g.setFont(labelFont(12.0f));
+        g.drawText(utf("TROCAR ACORDE ") + juce::String(slot + 1).paddedLeft('0', 2), header.removeFromTop(30.0f).withTrimmedTop(10.0f),
+                   juce::Justification::centredLeft);
+        g.setColour(juce::Colour(textPrimary));
+        g.setFont(font(19.0f, true));
+        g.drawText(utf(current.name.c_str()), header.removeFromTop(24.0f), juce::Justification::centredLeft);
+        g.setColour(juce::Colour(textSecondary));
+        g.setFont(font(13.0f));
+        g.drawText(chordNotes(current), header.withY(header.getY() - 24.0f).withHeight(24.0f), juce::Justification::centredRight);
+
+        g.setColour(juce::Colour(borderQuiet));
+        g.fillRect(16.0f, (float) headerHeight - 1.0f, (float) panelWidth - 32.0f, 1.0f);
+
+        for (const auto& row : rows) {
+            const auto label = row.labelArea;
+            const auto& sample = choices[(size_t) row.items.front()];
+            auto pill = juce::Rectangle<float>(label.getX(), label.getY() + 2.0f, 38.0f, 24.0f);
             g.setColour(juce::Colour(orange).withAlpha(0.14f));
-            g.fillRoundedRectangle(r, 6.0f);
-            g.setColour(juce::Colour(orange));
-            g.fillRoundedRectangle(r.withWidth(3.0f).reduced(0.0f, 5.0f), 1.5f);
+            g.fillRoundedRectangle(pill, 12.0f);
+            g.setColour(juce::Colour(orangeLight));
+            g.setFont(font(14.0f, true));
+            g.drawText(romanNumeral(sample), pill, juce::Justification::centred);
+            g.setColour(juce::Colour(textSecondary));
+            g.setFont(labelFont(10.5f));
+            const bool subtonic = row.degree == 6 && ((sample.root - key) % 12 + 12) % 12 == 10;
+            g.drawText(utf(subtonic ? "SUBTÔNICA" : degreeFunctions[(size_t) juce::jlimit(0, 6, row.degree)]),
+                       label.withTrimmedTop(30.0f).withHeight(16.0f), juce::Justification::centredLeft);
         }
-        g.setColour(highlighted ? juce::Colour(orangeLight) : juce::Colour(textPrimary));
-        g.setFont(font(15.0f, true));
-        g.drawText(title, getLocalBounds().reduced(12, 0), juce::Justification::centredLeft);
+
+        for (size_t i = 0; i < chipAreas.size(); ++i) {
+            const auto& chord = choices[i];
+            auto chip = chipAreas[i];
+            const bool isCurrent = chord.degree == current.degree && chord.kind == current.kind;
+            const bool isHover = (int) i == hovered;
+            if (isHover) {
+                g.setGradientFill(accentGradient(chip));
+                g.fillRoundedRectangle(chip, 8.0f);
+            } else {
+                g.setColour(isCurrent ? juce::Colour(orange).withAlpha(0.12f) : juce::Colour(surfaceRaised));
+                g.fillRoundedRectangle(chip, 8.0f);
+                g.setColour(isCurrent ? juce::Colour(orange) : juce::Colour(border));
+                g.drawRoundedRectangle(chip.reduced(0.5f), 8.0f, 1.0f);
+            }
+            g.setColour(isHover ? juce::Colour(0xff160904) : isCurrent ? juce::Colour(orangeLight) : juce::Colour(textPrimary));
+            g.setFont(font(14.0f, true));
+            g.drawFittedText(utf(chord.name.c_str()), chip.toNearestInt().reduced(6, 0), juce::Justification::centred, 1, 0.75f);
+        }
+
+        auto footer = getLocalBounds().toFloat().removeFromBottom((float) footerHeight).reduced(16.0f, 0.0f);
+        g.setColour(juce::Colour(textQuiet));
+        g.setFont(font(12.5f));
+        const auto hint = hovered >= 0 ? utf("Ouvindo ") + utf(choices[(size_t) hovered].name.c_str()) + utf("  ·  clique para usar")
+                                       : utf("Passe o mouse para ouvir  ·  clique para trocar");
+        g.drawText(hint, footer, juce::Justification::centredLeft);
     }
 
-    void mouseEnter(const juce::MouseEvent&) override {
-        highlighted = true;
-        repaint();
-        if (hoverAction) hoverAction();
+    void mouseMove(const juce::MouseEvent& e) override { setHovered(chipAt(e.position)); }
+    void mouseDrag(const juce::MouseEvent& e) override { setHovered(chipAt(e.position)); }
+    void mouseExit(const juce::MouseEvent&) override { setHovered(-1); }
+    void mouseUp(const juce::MouseEvent& e) override {
+        const int index = chipAt(e.position);
+        if (index < 0) return;
+        *chosen = index;
+        triggerMenuItem();
     }
-    void mouseExit(const juce::MouseEvent&) override { highlighted = false; repaint(); }
 
 private:
-    juce::String title;
-    std::function<void()> hoverAction;
-    bool highlighted {};
+    static constexpr const char* degreeFunctions[] { "TÔNICA", "SUPERTÔNICA", "MEDIANTE", "SUBDOMINANTE",
+                                                     "DOMINANTE", "SUBMEDIANTE", "SENSÍVEL" };
+    static constexpr int chipsPerLine = 6, chipWidth = 76, chipHeight = 30, chipGap = 6;
+    static constexpr int labelWidth = 104, headerHeight = 66, footerHeight = 34;
+    static constexpr int panelWidth = 16 + labelWidth + chipsPerLine * chipWidth + (chipsPerLine - 1) * chipGap + 16;
+
+    struct Row { int degree; std::vector<int> items; juce::Rectangle<float> labelArea; };
+
+    void layout() {
+        chipAreas.assign(choices.size(), {});
+        int y = headerHeight + 12;
+        for (auto& row : rows) {
+            row.labelArea = { 16.0f, (float) y, (float) labelWidth - 8.0f, 48.0f };
+            for (size_t n = 0; n < row.items.size(); ++n) {
+                const int line = (int) n / chipsPerLine, column = (int) n % chipsPerLine;
+                chipAreas[(size_t) row.items[n]] = { (float) (16 + labelWidth + column * (chipWidth + chipGap)),
+                                                     (float) (y + line * (chipHeight + chipGap)),
+                                                     (float) chipWidth, (float) chipHeight };
+            }
+            const int lines = ((int) row.items.size() + chipsPerLine - 1) / chipsPerLine;
+            y += juce::jmax(48, lines * (chipHeight + chipGap) - chipGap) + 14;
+        }
+        totalHeight = y + footerHeight - 6;
+    }
+
+    int chipAt(juce::Point<float> p) const {
+        for (size_t i = 0; i < chipAreas.size(); ++i)
+            if (chipAreas[i].contains(p)) return (int) i;
+        return -1;
+    }
+
+    void setHovered(int index) {
+        if (index == hovered) return;
+        hovered = index;
+        repaint();
+        if (index >= 0 && hoverAction) hoverAction(choices[(size_t) index]);
+    }
+
+    int slot {}, key {};
+    ccp::Chord current;
+    std::vector<ccp::Chord> choices;
+    std::vector<Row> rows;
+    std::vector<juce::Rectangle<float>> chipAreas;
+    std::function<void(const ccp::Chord&)> hoverAction;
+    std::shared_ptr<int> chosen;
+    int hovered { -1 }, totalHeight {};
 };
 }
 
@@ -145,7 +250,7 @@ void SegmentedControl::paint(juce::Graphics& g) {
                                            juce::Colours::white.withAlpha(0.0f), 0.0f, pill.getCentreY(), false));
     g.fillRoundedRectangle(pill.reduced(1.5f).withHeight(pill.getHeight() * 0.5f), 7.0f);
 
-    g.setFont(labelFont(13.5f));
+    g.setFont(labelFont(15.5f));
     for (int i = 0; i < items.size(); ++i) {
         const float closeness = juce::jlimit(0.0f, 1.0f, 1.0f - std::abs(indicator - (float) i));
         const auto idle = juce::Colour(i == hovered ? textPrimary : textSecondary);
@@ -174,7 +279,7 @@ void ChordCardComponent::advanceAnimation() {
     const float hoverTarget = available && hover ? 1.0f : 0.0f;
     const float activeTarget = available && playing ? 1.0f : 0.0f;
     const auto ease = [](float& value, float target, float speed) {
-        if (std::abs(value - target) < 0.005f) { const bool changed = value != target; value = target; return changed; }
+        if (std::abs(value - target) < 0.005f) { const bool changed = std::abs(value - target) > 0.0f; value = target; return changed; }
         value += (target - value) * speed;
         return true;
     };
@@ -225,7 +330,7 @@ void ChordCardComponent::paint(juce::Graphics& g) {
     g.setColour(active ? juce::Colour(orange).withAlpha(0.18f) : juce::Colour(0xff1d2127).withMultipliedAlpha(alpha));
     g.fillRoundedRectangle(badge, 7.0f);
     g.setColour(active ? juce::Colour(orangeLight) : juce::Colour(textSecondary).withMultipliedAlpha(alpha));
-    g.setFont(font(13.0f, true));
+    g.setFont(font(15.0f, true));
     g.drawText(juce::String(slot + 1).paddedLeft('0', 2), badge, juce::Justification::centred);
 
     if (available) {
@@ -252,16 +357,16 @@ void ChordCardComponent::paint(juce::Graphics& g) {
 
     if (available) {
         const auto numeral = romanNumeral(chord);
-        g.setFont(font(14.0f, true));
-        const float numeralWidth = (float) juce::GlyphArrangement::getStringWidthInt(font(14.0f, true), numeral) + 16.0f;
+        g.setFont(font(17.0f, true));
+        const float numeralWidth = (float) juce::GlyphArrangement::getStringWidthInt(font(17.0f, true), numeral) + 18.0f;
         const auto notes = chordNotes(chord);
-        const auto notesFont = font(13.0f, false);
+        const auto notesFont = font(16.0f, false);
         const float notesWidth = (float) juce::GlyphArrangement::getStringWidthInt(notesFont, notes);
         const float rowWidth = numeralWidth + 10.0f + notesWidth;
-        auto row = juce::Rectangle<float>(rowWidth, 22.0f).withCentre({ r.getCentreX(), r.getY() + 146.0f - lift * 0.5f });
+        auto row = juce::Rectangle<float>(rowWidth, 26.0f).withCentre({ r.getCentreX(), r.getY() + 146.0f - lift * 0.5f });
         auto pill = row.removeFromLeft(numeralWidth);
         g.setColour(juce::Colour(orange).withAlpha(0.12f + 0.10f * activeLevel));
-        g.fillRoundedRectangle(pill, 11.0f);
+        g.fillRoundedRectangle(pill, 13.0f);
         g.setColour(juce::Colour(orangeLight));
         g.drawText(numeral, pill, juce::Justification::centred);
         row.removeFromLeft(10.0f);
@@ -341,11 +446,11 @@ void ContinueCard::paintButton(juce::Graphics& g, bool over, bool down) {
     if (!backMode) g.drawLine(c.x, c.y - 9.0f, c.x, c.y + 9.0f, 2.4f);
 
     g.setColour(juce::Colour(textPrimary));
-    g.setFont(labelFont(14.0f));
+    g.setFont(labelFont(16.0f));
     g.drawFittedText(backMode ? "VOLTAR A 4" : "CONTINUAR", 8, 138, getWidth() - 16, 24,
                      juce::Justification::centred, 1);
     g.setColour(juce::Colour(textSecondary));
-    g.setFont(labelFont(11.5f));
+    g.setFont(labelFont(13.0f));
     g.drawFittedText(backMode ? "REMOVER 4" : "+4 ACORDES", 8, 162, getWidth() - 16, 20,
                      juce::Justification::centred, 1);
 }
@@ -369,7 +474,7 @@ void StatusPill::paint(juce::Graphics& g) {
     g.setColour(live ? juce::Colour(orange) : juce::Colour(textQuiet));
     g.fillEllipse(dot);
     g.setColour(juce::Colour(textSecondary));
-    g.setFont(labelFont(12.5f));
+    g.setFont(labelFont(14.0f));
     g.drawFittedText(text, r.withTrimmedLeft(34.0f).withTrimmedRight(14.0f).toNearestInt(), juce::Justification::centredLeft, 1);
 }
 
@@ -540,7 +645,7 @@ void ChordCodeProEditor::paint(juce::Graphics& g) {
     g.setColour(juce::Colour(border));
     g.drawRoundedRectangle(versionPill, 13.0f, 1.0f);
     g.setColour(juce::Colour(textSecondary));
-    g.setFont(font(13.0f, true));
+    g.setFont(font(15.0f, true));
     g.drawText("v" JucePlugin_VersionString, versionPill, juce::Justification::centred);
 
     {
@@ -581,7 +686,7 @@ void ChordCodeProEditor::resized() {
 
     const int margin = (int) ChordCardComponent::glowMargin;
     cardsViewport.setBounds(34 - margin, 332 - margin, 1288 + margin * 2, 252 + margin * 2);
-    status.setBounds(1060, 32, 310, 28);
+    status.setBounds(1000, 30, 370, 32);
     layoutChordPages();
     continueCard.setBounds(1358, 332, 142, 252);
 
@@ -748,24 +853,20 @@ void ChordCodeProEditor::showChordChoices(int slot) {
     juce::PopupMenu menu;
     menu.setLookAndFeel(&laf);
     juce::Component::SafePointer<ChordCodeProEditor> safe(this);
-    for (size_t i = 0; i < choices.size(); ++i) {
-        const auto choice = choices[i];
-        auto item = std::make_unique<ChordChoiceMenuItem>(
-            utf(choice.name.c_str()), [safe, slot, choice] {
-                if (safe != nullptr) safe->pro.auditionChord(slot, choice);
-            });
-        menu.addCustomItem((int) i + 1, std::move(item), nullptr, utf(choice.name.c_str()));
-    }
+    auto chosen = std::make_shared<int>(-1);
+    menu.addCustomItem(1, std::make_unique<ChordPickerPanel>(
+        slot, pro.getProgression().settings.key, pro.getProgression().chords[(size_t) slot], choices,
+        [safe, slot](const ccp::Chord& choice) { if (safe != nullptr) safe->pro.auditionChord(slot, choice); },
+        chosen), nullptr, utf("Trocar acorde"));
 
     menu.showMenuAsync(juce::PopupMenu::Options().withParentComponent(this)
                                                    .withTargetComponent(this)
-                                                   .withTargetScreenArea(cards[(size_t) slot].getScreenBounds())
-                                                   .withMaximumNumColumns(2),
-        [safe, slot, choices](int result) {
+                                                   .withTargetScreenArea(cards[(size_t) slot].getScreenBounds()),
+        [safe, slot, choices, chosen](int result) {
             if (safe == nullptr) return;
             safe->pro.stopPreview();
-            if (result > 0 && result <= (int) choices.size()) {
-                safe->pro.chooseChord(slot, choices[(size_t) (result - 1)]);
+            if (result == 1 && *chosen >= 0 && *chosen < (int) choices.size()) {
+                safe->pro.chooseChord(slot, choices[(size_t) *chosen]);
                 safe->refresh();
             }
         });

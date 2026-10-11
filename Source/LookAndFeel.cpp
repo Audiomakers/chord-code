@@ -1,4 +1,5 @@
 #include "LookAndFeel.h"
+#include <juce_audio_processors/juce_audio_processors.h>
 #include "ChordCodeTheme.h"
 #include "FigmaIcons.h"
 
@@ -82,7 +83,7 @@ void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool
     const bool primary = id == "generate";
     const auto colour = primary ? juce::Colour(0xff160904) : juce::Colour(textPrimary);
     g.setColour(colour);
-    g.setFont(primary ? font(26.0f, true).withExtraKerningFactor(0.14f) : labelFont(15.0f));
+    g.setFont(primary ? font(26.0f, true).withExtraKerningFactor(0.14f) : labelFont(16.5f));
     auto textArea = b.getLocalBounds().toFloat();
     const bool icon = id == "play" || id == "variation" || id == "random" || id == "history" || id == "drag" || id == "save";
     if (icon) textArea = textArea.withTrimmedLeft(34.0f);
@@ -216,6 +217,22 @@ void ProLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<
     }
 }
 
+juce::PopupMenu::Options ProLookAndFeel::getOptionsForComboBoxPopupMenu(juce::ComboBox& box, juce::Label& label) {
+    auto options = LookAndFeel_V4::getOptionsForComboBoxPopupMenu(box, label);
+    // Open the list inside the editor so it is drawn at full size instead of
+    // inheriting the editor's down-scaled transform.
+    if (auto* editor = box.findParentComponentOfClass<juce::AudioProcessorEditor>()) {
+        const auto area = editor->getLocalArea(nullptr, box.getScreenBounds());
+        options = options.withParentComponent(editor)
+                         .withTargetScreenArea(box.getScreenBounds())
+                         .withMinimumWidth(area.getWidth())
+                         .withStandardItemHeight(30)
+                         .withMaximumNumColumns(2)
+                         .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards);
+    }
+    return options;
+}
+
 juce::Font ProLookAndFeel::getComboBoxFont(juce::ComboBox&) { return font(22.0f, true); }
 juce::Font ProLookAndFeel::getPopupMenuFont() { return font(16.0f); }
 
@@ -223,6 +240,6 @@ void ProLookAndFeel::getIdealPopupMenuItemSize(const juce::String& text, bool se
                                                int standardHeight, int& width, int& height) {
     if (separator) { width = 50; height = 10; return; }
     const auto popupFont = getPopupMenuFont();
-    height = standardHeight > 0 ? juce::jmax(standardHeight, 34) : juce::roundToInt(popupFont.getHeight() * 1.35f);
+    height = standardHeight > 0 ? juce::jmax(standardHeight, 30) : juce::roundToInt(popupFont.getHeight() * 1.35f);
     width = juce::GlyphArrangement::getStringWidthInt(popupFont, text) + height * 2;
 }
