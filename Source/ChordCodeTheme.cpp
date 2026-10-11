@@ -21,6 +21,36 @@ juce::Font font(float height, bool bold) {
     return juce::Font(juce::FontOptions(bold ? boldTypeface() : regularTypeface()).withHeight(height));
 }
 
+juce::Font labelFont(float height) {
+    return font(height, true).withExtraKerningFactor(0.08f);
+}
+
+juce::ColourGradient accentGradient(juce::Rectangle<float> r) {
+    juce::ColourGradient gradient(juce::Colour(orange), r.getX(), r.getBottom(),
+                                  juce::Colour(orangeLight), r.getRight(), r.getY(), false);
+    gradient.addColour(0.85, juce::Colour(amber).interpolatedWith(juce::Colour(orangeLight), 0.55f));
+    return gradient;
+}
+
+juce::ColourGradient raisedGradient(juce::Rectangle<float> r, juce::Colour top, juce::Colour bottom) {
+    return juce::ColourGradient(top, 0.0f, r.getY(), bottom, 0.0f, r.getBottom(), false);
+}
+
+void drawGlow(juce::Graphics& g, const juce::Path& shape, juce::Colour colour, int radius) {
+    juce::DropShadow(colour, radius, {}).drawForPath(g, shape);
+}
+
+void drawRaisedPanel(juce::Graphics& g, juce::Rectangle<float> r, float radius, juce::Colour outline) {
+    g.setGradientFill(raisedGradient(r, juce::Colour(surfaceRaised), juce::Colour(surface)));
+    g.fillRoundedRectangle(r, radius);
+    // A faint top highlight gives panels a lifted, glassy edge.
+    g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.07f), 0.0f, r.getY(),
+                                           juce::Colours::transparentWhite, 0.0f, r.getY() + r.getHeight() * 0.5f, false));
+    g.drawRoundedRectangle(r.reduced(0.5f), radius, 1.0f);
+    g.setColour(outline);
+    g.drawRoundedRectangle(r, radius, 1.0f);
+}
+
 void drawPlayIcon(juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c) {
     juce::Path p;
     p.addTriangle(r.getX() + r.getWidth() * 0.31f, r.getY() + r.getHeight() * 0.20f,
