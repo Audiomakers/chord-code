@@ -295,8 +295,8 @@ RectF optionArea(Hit option) {
 }
 RectF folderField() { return rect(48, 342, 544, 38); }
 RectF changeButton() { return rect(500, 346, 86, 30); }
-RectF secondaryButton() { return rect(344, 432, 120, 44); }
-RectF primaryButton() { return rect(476, 432, 132, 44); }
+RectF secondaryButton() { return rect(328, 432, 120, 44); }
+RectF primaryButton() { return rect(460, 432, 148, 44); }
 
 bool optionEnabled(Hit option) { return option != Hit::optionShortcut || state.installApp; }
 bool optionChecked(Hit option) {
