@@ -1,4 +1,5 @@
 #include "LookAndFeel.h"
+#include <juce_audio_processors/juce_audio_processors.h>
 #include "ChordCodeTheme.h"
 #include "FigmaIcons.h"
 
@@ -30,7 +31,7 @@ ProLookAndFeel::ProLookAndFeel() {
     setColour(juce::PopupMenu::backgroundColourId, juce::Colour(surface));
     setColour(juce::PopupMenu::textColourId, juce::Colour(textPrimary));
     setColour(juce::PopupMenu::highlightedBackgroundColourId, juce::Colour(orange));
-    setColour(juce::PopupMenu::highlightedTextColourId, juce::Colour(background));
+    setColour(juce::PopupMenu::highlightedTextColourId, juce::Colour(orangeLight));
     setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(surface));
     setColour(juce::Slider::textBoxTextColourId, juce::Colour(textPrimary));
     setColour(juce::Slider::textBoxOutlineColourId, juce::Colour(border));
@@ -38,26 +39,39 @@ ProLookAndFeel::ProLookAndFeel() {
 
 void ProLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down) {
     const auto id = b.getComponentID();
-    auto r = b.getLocalBounds().toFloat().reduced(id == "settings" ? 0.0f : 0.75f);
+    auto r = b.getLocalBounds().toFloat().reduced(0.75f);
     if (id == "settings") {
-        return;
-    }
-    if (id == "generate") {
-        g.setColour(juce::Colour(orange));
-        g.fillRoundedRectangle(r, 9.0f);
         if (over || down) {
-            g.setColour(juce::Colours::white.withAlpha(down ? 0.15f : 0.08f));
-            g.fillRoundedRectangle(r, 9.0f);
+            g.setColour(juce::Colour(surfaceHover).withAlpha(down ? 1.0f : 0.85f));
+            g.fillRoundedRectangle(r, 10.0f);
         }
         return;
     }
-    auto fill = juce::Colour(surface);
-    if (over) fill = juce::Colour(0xff080a0b);
-    if (down) fill = juce::Colour(0xff0b0d0e);
-    g.setColour(fill);
-    g.fillRoundedRectangle(r, 9.0f);
-    g.setColour(over ? juce::Colour(orange) : juce::Colour(border));
-    g.drawRoundedRectangle(r, 9.0f, 1.0f);
+    if (id == "generate") {
+        g.setGradientFill(accentGradient(r));
+        g.fillRoundedRectangle(r, 14.0f);
+        // Glossy top sheen.
+        g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.28f), 0.0f, r.getY(),
+                                               juce::Colours::white.withAlpha(0.0f), 0.0f, r.getCentreY(), false));
+        g.fillRoundedRectangle(r.reduced(2.0f).withHeight(r.getHeight() * 0.5f), 12.0f);
+        if (over || down) {
+            g.setColour(down ? juce::Colours::black.withAlpha(0.10f) : juce::Colours::white.withAlpha(0.10f));
+            g.fillRoundedRectangle(r, 14.0f);
+        }
+        g.setColour(juce::Colours::white.withAlpha(0.22f));
+        g.drawRoundedRectangle(r.reduced(0.5f), 14.0f, 1.0f);
+        return;
+    }
+    const auto top = down ? juce::Colour(surface) : over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised);
+    g.setGradientFill(raisedGradient(r, top, juce::Colour(surface)));
+    g.fillRoundedRectangle(r, 12.0f);
+    if (over) {
+        g.setGradientFill(juce::ColourGradient(juce::Colour(orange).withAlpha(0.10f), 0.0f, r.getBottom(),
+                                               juce::Colour(orange).withAlpha(0.0f), 0.0f, r.getY(), false));
+        g.fillRoundedRectangle(r, 12.0f);
+    }
+    g.setColour(over ? juce::Colour(orange).withAlpha(0.75f) : juce::Colour(border));
+    g.drawRoundedRectangle(r, 12.0f, 1.0f);
 }
 
 void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool, bool) {
@@ -67,9 +81,9 @@ void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool
         return;
     }
     const bool primary = id == "generate";
-    const auto colour = primary ? juce::Colour(background) : juce::Colour(textPrimary);
+    const auto colour = primary ? juce::Colour(0xff160904) : juce::Colour(textPrimary);
     g.setColour(colour);
-    g.setFont(font(primary ? 24.0f : 16.0f, true));
+    g.setFont(primary ? font(26.0f, true).withExtraKerningFactor(0.14f) : labelFont(16.5f));
     auto textArea = b.getLocalBounds().toFloat();
     const bool icon = id == "play" || id == "variation" || id == "random" || id == "history" || id == "drag" || id == "save";
     if (icon) textArea = textArea.withTrimmedLeft(34.0f);
@@ -89,36 +103,57 @@ void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool
     else if (id == "save") drawSvg(g, saveIcon.get(), iconArea);
 }
 
-void ProLookAndFeel::drawComboBox(juce::Graphics& g, int w, int h, bool over, int, int, int, int, juce::ComboBox&) {
+void ProLookAndFeel::drawComboBox(juce::Graphics& g, int w, int h, bool down, int, int, int, int, juce::ComboBox& box) {
     auto r = juce::Rectangle<float>(0.75f, 0.75f, (float) w - 1.5f, (float) h - 1.5f);
-    g.setColour(juce::Colour(surface));
+    const bool over = box.isMouseOver(true);
+    const bool open = box.isPopupActive() || down;
+    g.setGradientFill(raisedGradient(r, juce::Colour(over ? surfaceHover : surfaceRaised), juce::Colour(surface)));
     g.fillRoundedRectangle(r, radiusControl);
-    g.setColour(over ? juce::Colour(orange) : juce::Colour(border));
-    g.drawRoundedRectangle(r, radiusControl, 1.0f);
-    g.setColour(juce::Colour(textPrimary));
+    g.setColour(open ? juce::Colour(orange) : over ? juce::Colour(orange).withAlpha(0.6f) : juce::Colour(border));
+    g.drawRoundedRectangle(r, radiusControl, open ? 1.4f : 1.0f);
+
+    auto chip = juce::Rectangle<float>((float) w - 42.0f, ((float) h - 30.0f) * 0.5f, 30.0f, 30.0f);
+    g.setColour(open || over ? juce::Colour(orange).withAlpha(0.16f) : juce::Colour(0xff1d2127));
+    g.fillRoundedRectangle(chip, 8.0f);
+    g.setColour(open || over ? juce::Colour(orangeLight) : juce::Colour(textSecondary));
+    const auto c = chip.getCentre();
     juce::Path arrow;
-    arrow.startNewSubPath((float) w - 29.0f, (float) h * 0.43f);
-    arrow.lineTo((float) w - 21.0f, (float) h * 0.58f);
-    arrow.lineTo((float) w - 13.0f, (float) h * 0.43f);
-    g.strokePath(arrow, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    const float dir = open ? -1.0f : 1.0f;
+    arrow.startNewSubPath(c.x - 6.0f, c.y - 3.0f * dir);
+    arrow.lineTo(c.x, c.y + 3.0f * dir);
+    arrow.lineTo(c.x + 6.0f, c.y - 3.0f * dir);
+    g.strokePath(arrow, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 }
 
 void ProLookAndFeel::positionComboBoxText(juce::ComboBox& box, juce::Label& label) {
-    label.setBounds(17, 1, box.getWidth() - 54, box.getHeight() - 2);
+    label.setBounds(17, 1, box.getWidth() - 62, box.getHeight() - 2);
     label.setFont(getComboBoxFont(box));
     label.setJustificationType(juce::Justification::centredLeft);
 }
 
 void ProLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int w, int h, float pos,
-                                      float, float, juce::Slider::SliderStyle, juce::Slider&) {
+                                      float, float, juce::Slider::SliderStyle, juce::Slider& slider) {
     const float trackY = (float) y + (float) h * 0.5f;
-    const float left = (float) x + 1.0f;
-    const float right = (float) x + (float) w - 1.0f;
-    g.setColour(juce::Colour(0xff252a2d));
-    g.fillRoundedRectangle(left, trackY - 3.5f, right - left, 7.0f, 3.5f);
+    const float left = (float) x + 10.0f;
+    const float right = (float) x + (float) w - 10.0f;
+    pos = juce::jlimit(left, right, pos);
+    auto track = juce::Rectangle<float>(left, trackY - 3.0f, right - left, 6.0f);
+    g.setColour(juce::Colour(0xff1f232a));
+    g.fillRoundedRectangle(track, 3.0f);
+    auto filled = track.withWidth(juce::jmax(6.0f, pos - left));
+    g.setGradientFill(juce::ColourGradient(juce::Colour(orange), left, trackY, juce::Colour(amber), right, trackY, false));
+    g.fillRoundedRectangle(filled, 3.0f);
+
+    const bool over = slider.isMouseOverOrDragging();
+    const float knob = over ? 24.0f : 22.0f;
+    auto thumb = juce::Rectangle<float>(knob, knob).withCentre({ pos, trackY });
+    juce::Path thumbPath;
+    thumbPath.addEllipse(thumb);
+    drawGlow(g, thumbPath, juce::Colour(orange).withAlpha(over ? 0.75f : 0.5f), 14);
+    g.setColour(juce::Colour(textPrimary));
+    g.fillEllipse(thumb);
     g.setColour(juce::Colour(orange));
-    g.fillRoundedRectangle(left, trackY - 3.5f, juce::jmax(0.0f, pos - left), 7.0f, 3.5f);
-    g.fillEllipse(pos - 11.5f, trackY - 11.5f, 23.0f, 23.0f);
+    g.fillEllipse(thumb.reduced(knob * 0.30f));
 }
 
 void ProLookAndFeel::drawLabel(juce::Graphics& g, juce::Label& l) {
@@ -130,7 +165,7 @@ void ProLookAndFeel::drawLabel(juce::Graphics& g, juce::Label& l) {
 
 void ProLookAndFeel::drawPopupMenuBackground(juce::Graphics& g, int width, int height) {
     g.fillAll(juce::Colour(surface));
-    g.setColour(juce::Colour(borderQuiet));
+    g.setColour(juce::Colour(border));
     g.drawRect(0, 0, width, height, 1);
 }
 
@@ -141,23 +176,28 @@ void ProLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<
                                        const juce::Colour* textColour) {
     if (separator) {
         g.setColour(juce::Colour(borderQuiet));
-        g.fillRect(area.withHeight(1).withY(area.getCentreY()));
+        g.fillRect(area.reduced(10, 0).withHeight(1).withY(area.getCentreY()));
         return;
     }
 
     if (highlighted && enabled) {
+        auto r = area.toFloat().reduced(4.0f, 2.0f);
+        g.setColour(juce::Colour(orange).withAlpha(0.14f));
+        g.fillRoundedRectangle(r, 6.0f);
         g.setColour(juce::Colour(orange));
-        g.fillRect(area);
+        g.fillRoundedRectangle(r.withWidth(3.0f).reduced(0.0f, 5.0f), 1.5f);
     }
 
     const auto colour = !enabled ? juce::Colour(textQuiet)
-        : highlighted ? juce::Colour(background)
+        : highlighted ? juce::Colour(orangeLight)
         : (textColour != nullptr ? *textColour : juce::Colour(textPrimary));
     g.setColour(colour);
     g.setFont(font(15.0f, true));
-    auto textArea = area.reduced(12, 0);
+    auto textArea = area.reduced(14, 0);
     if (ticked) {
-        g.drawText(juce::CharPointer_UTF8("✓"), textArea.removeFromLeft(20), juce::Justification::centredLeft);
+        g.setColour(juce::Colour(orange));
+        g.fillEllipse(textArea.removeFromLeft(20).toFloat().withSizeKeepingCentre(7.0f, 7.0f));
+        g.setColour(colour);
     }
     if (icon != nullptr)
         icon->drawWithin(g, textArea.removeFromLeft(22).toFloat().reduced(2.0f),
@@ -170,11 +210,27 @@ void ProLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<
 
     if (hasSubMenu) {
         juce::Path arrow;
-        arrow.addTriangle((float) area.getRight() - 13.0f, (float) area.getCentreY() - 4.0f,
-                          (float) area.getRight() - 13.0f, (float) area.getCentreY() + 4.0f,
-                          (float) area.getRight() - 8.0f, (float) area.getCentreY());
-        g.fillPath(arrow);
+        arrow.startNewSubPath((float) area.getRight() - 15.0f, (float) area.getCentreY() - 4.0f);
+        arrow.lineTo((float) area.getRight() - 11.0f, (float) area.getCentreY());
+        arrow.lineTo((float) area.getRight() - 15.0f, (float) area.getCentreY() + 4.0f);
+        g.strokePath(arrow, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
+}
+
+juce::PopupMenu::Options ProLookAndFeel::getOptionsForComboBoxPopupMenu(juce::ComboBox& box, juce::Label& label) {
+    auto options = LookAndFeel_V4::getOptionsForComboBoxPopupMenu(box, label);
+    // Open the list inside the editor so it is drawn at full size instead of
+    // inheriting the editor's down-scaled transform.
+    if (auto* editor = box.findParentComponentOfClass<juce::AudioProcessorEditor>()) {
+        const auto area = editor->getLocalArea(nullptr, box.getScreenBounds());
+        options = options.withParentComponent(editor)
+                         .withTargetScreenArea(box.getScreenBounds())
+                         .withMinimumWidth(area.getWidth())
+                         .withStandardItemHeight(30)
+                         .withMaximumNumColumns(2)
+                         .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards);
+    }
+    return options;
 }
 
 juce::Font ProLookAndFeel::getComboBoxFont(juce::ComboBox&) { return font(22.0f, true); }
@@ -184,6 +240,6 @@ void ProLookAndFeel::getIdealPopupMenuItemSize(const juce::String& text, bool se
                                                int standardHeight, int& width, int& height) {
     if (separator) { width = 50; height = 10; return; }
     const auto popupFont = getPopupMenuFont();
-    height = standardHeight > 0 ? juce::jmax(standardHeight, 34) : juce::roundToInt(popupFont.getHeight() * 1.35f);
+    height = standardHeight > 0 ? juce::jmax(standardHeight, 30) : juce::roundToInt(popupFont.getHeight() * 1.35f);
     width = juce::GlyphArrangement::getStringWidthInt(popupFont, text) + height * 2;
 }

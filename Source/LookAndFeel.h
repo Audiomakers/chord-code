@@ -17,6 +17,7 @@ public:
                            bool, bool, const juce::String&, const juce::String&,
                            const juce::Drawable*, const juce::Colour*) override;
     juce::Font getComboBoxFont(juce::ComboBox&) override;
+    juce::PopupMenu::Options getOptionsForComboBoxPopupMenu(juce::ComboBox&, juce::Label&) override;
     juce::Font getPopupMenuFont() override;
     void getIdealPopupMenuItemSize(const juce::String&, bool, int, int&, int&) override;
     int getPopupMenuBorderSize() override { return 1; }

@@ -14,7 +14,7 @@ enum class Mood { standard, melancholic, emotional, atmospheric, fun, dark, roma
 enum class Complexity { simple, colorful, rich, automatic, count };
 enum class Tension { standard, soft, medium, high, count };
 enum class Voicing { standard, closed, open, inverted, count };
-enum class Timbre { electricPiano, synthSaw, organ, atmosphericPad, violin, flute, count };
+enum class Timbre { electricPiano, synthSaw, organ, atmosphericPad, violin, flute, piano, count };
 enum class ChordKind { triad, seventh, ninth, add9, sus2, sus4, dominant7, sixth, minorMajor7, sixthNinth, eleventh, count };
 
 struct Chord { int degree{};int root{};ChordKind kind{ChordKind::triad};std::array<int,5> notes{};int noteCount{3};int velocity{88};std::string name; };
