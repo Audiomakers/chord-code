@@ -1,0 +1,68 @@
+name: Build Windows plugin
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "Source/**"
+      - "Installer/**"
+      - "Assets/**"
+      - ".github/workflows/windows-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "CMakeLists.txt"
+      - "Source/**"
+      - "Installer/**"
+      - "Assets/**"
+      - ".github/workflows/windows-build.yml"
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Windows installer (app + VST3)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build installer and tests
+        run: cmake --build build --config Release --parallel --target ChordCodeProInstaller ChordCodePro_Standalone chordcode_pro_tests chordcode_audio_tests
+
+      - name: Run tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Render installer preview
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force preview | Out-Null
+          Start-Process "build/Release/Windows/ChordCodeProInstaller.exe" -ArgumentList "--screenshot", "$pwd\preview" -Wait
+          Get-ChildItem preview/*.png | ForEach-Object {
+            Write-Output "PREVIEW-BEGIN $($_.Name)"
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName))
+            Write-Output "PREVIEW-END"
+          }
+
+      - name: Collect build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist-windows | Out-Null
+          Copy-Item "build/Release/Windows/ChordCodeProInstaller.exe" "dist-windows/Chord Code Setup.exe"
+          Copy-Item -Recurse "build/ChordCodePro_artefacts/Release/VST3/Chord Code.vst3" "dist-windows/Chord Code.vst3"
+          Copy-Item preview/*.png dist-windows/
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v7
+        with:
+          name: chord-code-windows-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: dist-windows/

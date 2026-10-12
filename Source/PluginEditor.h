@@ -4,6 +4,8 @@
 #include "LookAndFeel.h"
 #include "PluginProcessor.h"
 #include "UpdateChecker.h"
+#include "License.h"
+#include "ModalPanels.h"
 
 class MidiDragButton final : public juce::TextButton {
 public:
@@ -42,6 +44,7 @@ public:
     ChordCardComponent();
     void setSlot(int value) { slot = value; repaint(); }
     void setChord(const ccp::Chord& value) { chord = value; repaint(); }
+    void setKeyRoot(int value) { if (keyRoot != value) { keyRoot = value; repaint(); } }
     void setLocked(bool value) { locked = value; repaint(); }
     void setSelected(bool value) { selected = value; repaint(); }
     void setPlaying(bool value) { if (playing != value) { playing = value; repaint(); } }
@@ -62,7 +65,7 @@ private:
     juce::Rectangle<float> playArea() const;
     juce::Rectangle<float> variationArea() const;
     juce::Rectangle<float> lockArea() const;
-    int slot {};
+    int slot {}, keyRoot {};
     bool locked {}, selected {}, playing {}, hover {}, available { true };
     float playbackPhase {}, hoverLevel {}, activeLevel {};
     ccp::Chord chord;
@@ -89,7 +92,7 @@ private:
     float pulse {};
 };
 
-class ChordCodeProEditor final : public juce::AudioProcessorEditor, private juce::Timer {
+class ChordCodeProEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::ChangeListener {
 public:
     explicit ChordCodeProEditor(ChordCodeProProcessor&);
     ~ChordCodeProEditor() override;
@@ -107,6 +110,10 @@ private:
     void showSettings();
     void checkForUpdates();
     void showUpdateResult(UpdateChecker::Result);
+    void presentPanel(std::unique_ptr<juce::Component>, bool dismissable);
+    void checkLicense();
+    void showLicense(LicensePanel::Mode);
+    void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void updateFromSettings();
     void animateToPage(int);
     void layoutChordPages();
@@ -130,7 +137,13 @@ private:
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, 10> comboAttachments;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> velocityAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
-    UpdateChecker updateChecker;
+    UpdateChecker updateChecker, backgroundUpdateCheck;
+    bool updateAvailable {};
+    void setUpdateAvailable(bool);
+    juce::SharedResourcePointer<LicenseManager> license;
+    ModalOverlay overlay;
+    std::shared_ptr<bool> showAllChords;
+    int licenseTicks {};
     int pageOffset {}, selectedSlot { -1 }, lastPlaying { -2 };
     float slidePosition {}, slideTarget {}, animationPhase {};
     bool ignore {};

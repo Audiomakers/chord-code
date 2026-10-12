@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(ChordCodePro VERSION 1.2.1 LANGUAGES C CXX)
+project(ChordCodePro VERSION 1.2.2 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(APPLE)
@@ -28,7 +28,13 @@ if(TARGET juce::juce_audio_utils)
  juce_add_binary_data(ChordCodeProSamples SOURCES
   Assets/Samples/violin_F4.wav
   Assets/Samples/pad_C4.wav
-  Assets/Samples/flute_Fsharp4.wav)
+  Assets/Samples/flute_Fsharp4.wav
+  Assets/Samples/Piano/piano_C2.ogg Assets/Samples/Piano/piano_Ds2.ogg Assets/Samples/Piano/piano_Fs2.ogg Assets/Samples/Piano/piano_A2.ogg
+  Assets/Samples/Piano/piano_C3.ogg Assets/Samples/Piano/piano_Ds3.ogg Assets/Samples/Piano/piano_Fs3.ogg Assets/Samples/Piano/piano_A3.ogg
+  Assets/Samples/Piano/piano_C4.ogg Assets/Samples/Piano/piano_Ds4.ogg Assets/Samples/Piano/piano_Fs4.ogg Assets/Samples/Piano/piano_A4.ogg
+  Assets/Samples/Piano/piano_C5.ogg Assets/Samples/Piano/piano_Ds5.ogg Assets/Samples/Piano/piano_Fs5.ogg Assets/Samples/Piano/piano_A5.ogg
+  Assets/Samples/Piano/piano_C6.ogg Assets/Samples/Piano/piano_Ds6.ogg Assets/Samples/Piano/piano_Fs6.ogg Assets/Samples/Piano/piano_A6.ogg
+  Assets/Samples/Piano/piano_C7.ogg)
  set(CCP_PLUGIN_FORMATS VST3)
  if(APPLE)
   list(APPEND CCP_PLUGIN_FORMATS AU)
@@ -59,6 +65,8 @@ if(TARGET juce::juce_audio_utils)
   Source/PluginProcessor.cpp Source/PluginProcessor.h
   Source/PluginEditor.cpp Source/PluginEditor.h
   Source/UpdateChecker.cpp Source/UpdateChecker.h
+  Source/License.cpp Source/License.h
+  Source/ModalPanels.cpp Source/ModalPanels.h
   Source/PreviewSynth.cpp Source/PreviewSynth.h
   Source/LookAndFeel.cpp Source/LookAndFeel.h
   Source/ChordCodeTheme.cpp Source/ChordCodeTheme.h
@@ -86,11 +94,17 @@ if(TARGET juce::juce_audio_utils)
   file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Installer/Installer.manifest" CCP_INSTALLER_MANIFEST)
   file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Assets/Brand/chord-code-pro.ico" CCP_INSTALLER_ICON)
   file(TO_CMAKE_PATH "${CMAKE_CURRENT_BINARY_DIR}/ChordCodePro_artefacts/Release/VST3/Chord Code.vst3/Contents/x86_64-win/Chord Code.vst3" CCP_INSTALLER_PLUGIN)
+  file(TO_CMAKE_PATH "${CMAKE_CURRENT_BINARY_DIR}/ChordCodePro_artefacts/Release/Standalone/Chord Code.exe" CCP_INSTALLER_APP)
   file(WRITE "${CCP_INSTALLER_DIR}/Installer.rc"
-   "#define RT_MANIFEST 24\n1 RT_MANIFEST \"${CCP_INSTALLER_MANIFEST}\"\n1 ICON \"${CCP_INSTALLER_ICON}\"\n201 RCDATA \"${CCP_INSTALLER_PLUGIN}\"\n")
+   "#define RT_MANIFEST 24\n1 RT_MANIFEST \"${CCP_INSTALLER_MANIFEST}\"\n1 ICON \"${CCP_INSTALLER_ICON}\"\n201 RCDATA \"${CCP_INSTALLER_PLUGIN}\"\n202 RCDATA \"${CCP_INSTALLER_APP}\"\n")
   add_executable(ChordCodeProInstaller WIN32 Installer/Installer.cpp "${CCP_INSTALLER_DIR}/Installer.rc")
-  target_link_libraries(ChordCodeProInstaller PRIVATE shell32 ole32 user32 gdi32)
-  add_dependencies(ChordCodeProInstaller ChordCodePro_VST3)
+  target_compile_definitions(ChordCodeProInstaller PRIVATE UNICODE _UNICODE "CCP_VERSION=L\"${PROJECT_VERSION}\"")
+  target_link_libraries(ChordCodeProInstaller PRIVATE shell32 ole32 uuid user32 gdi32 gdiplus dwmapi advapi32)
+  if(MSVC)
+   # The interface text is Portuguese; read the source as UTF-8.
+   target_compile_options(ChordCodeProInstaller PRIVATE /utf-8)
+  endif()
+  add_dependencies(ChordCodeProInstaller ChordCodePro_VST3 ChordCodePro_Standalone)
   set_target_properties(ChordCodeProInstaller PROPERTIES
    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/Release/Windows"
    LINK_FLAGS "/MANIFEST:NO")

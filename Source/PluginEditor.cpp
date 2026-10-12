@@ -7,7 +7,9 @@
 using namespace ChordCodeTheme;
 
 namespace {
-constexpr float editorScale = 960.0f / (float) designWidth;
+constexpr float editorScale = 1120.0f / (float) designWidth;
+// Popups were designed for the original 960 px wide window.
+constexpr float panelScale = 1120.0f / 960.0f;
 constexpr int cardPageWidth = 1324;
 juce::String utf(const char* text) { return juce::String::fromUTF8(text); }
 
@@ -33,12 +35,14 @@ void label(juce::Graphics& g, const char* text, int x, int y, int width) {
     g.drawText(utf(text), x, y, width, 20, juce::Justification::centredLeft);
 }
 
-juce::String romanNumeral(const ccp::Chord& chord) {
+juce::String romanNumeral(const ccp::Chord& chord, int key) {
     static const char* numerals[] { "I", "II", "III", "IV", "V", "VI", "VII" };
-    auto numeral = juce::String(numerals[(size_t) juce::jlimit(0, 6, chord.degree)]);
+    static const char* chromatic[] { "I", "bII", "II", "bIII", "III", "IV", "#IV", "V", "bVI", "VI", "bVII", "VII" };
+    auto numeral = chord.quality >= 0 ? juce::String(chromatic[(size_t) (((chord.root - key) % 12 + 12) % 12)])
+                                      : juce::String(numerals[(size_t) juce::jlimit(0, 6, chord.degree)]);
     auto suffix = utf(chord.name.c_str()).substring(1);
     if (suffix.startsWithChar('#') || suffix.startsWithChar('b')) suffix = suffix.substring(1);
-    if (suffix.startsWith("dim") || suffix.startsWith(utf("°")))
+    if (suffix.startsWith("dim") || suffix.startsWith(utf("°")) || suffix.startsWith("m7b5"))
         return numeral.toLowerCase() + utf("°");
     if (suffix.startsWithChar('m') && !suffix.startsWith("maj"))
         return numeral.toLowerCase();
@@ -65,150 +69,22 @@ juce::String chordFileStem(const ccp::Progression& progression) {
     return names.joinIntoString("-").substring(0, 120);
 }
 
-// Settings panel: same card language as the chord picker; tempo changes apply live.
-class SettingsPanel final : public juce::PopupMenu::CustomComponent {
-public:
-    struct Model {
-        std::function<bool()> isSynced;
-        std::function<int()> manualBpm, hostBpm;
-        std::function<void(bool)> setSynced;
-        std::function<void(int)> setManualBpm;
-        bool checking {};
-    };
-
-    SettingsPanel(Model m, std::shared_ptr<int> chosenAction)
-        : juce::PopupMenu::CustomComponent(false), model(std::move(m)), chosen(std::move(chosenAction)) {
-        int x = 16, y = 150;
-        for (size_t i = 0; i < bpmValues.size(); ++i) {
-            bpmAreas[i] = { (float) x, (float) y, 66.0f, 32.0f };
-            x += 72;
-            if (i == 3) { x = 16; y += 38; }
-        }
-    }
-
-    void getIdealSize(int& width, int& height) override { width = panelWidth; height = 366; }
-
-    void paint(juce::Graphics& g) override {
-        g.fillAll(juce::Colour(surface));
-        const bool synced = model.isSynced();
-        const int manual = model.manualBpm();
-
-        g.setColour(juce::Colour(textSecondary));
-        g.setFont(labelFont(12.0f));
-        g.drawText(utf("CONFIGURAÇÕES"), 16, 12, 200, 18, juce::Justification::centredLeft);
-        g.setColour(juce::Colour(textPrimary));
-        g.setFont(font(19.0f, true));
-        g.drawText("Chord Code", 16, 30, 200, 26, juce::Justification::centredLeft);
-        auto versionPill = juce::Rectangle<float>((float) panelWidth - 80.0f, 30.0f, 64.0f, 24.0f);
-        g.setColour(juce::Colour(surfaceRaised));
-        g.fillRoundedRectangle(versionPill, 12.0f);
-        g.setColour(juce::Colour(textSecondary));
-        g.setFont(font(12.5f, true));
-        g.drawText("v" JucePlugin_VersionString, versionPill, juce::Justification::centred);
-        divider(g, 66);
-
-        // Tempo: sync switch, then manual BPM chips.
-        sectionLabel(g, "TEMPO", 78);
-        auto row = syncRow();
-        g.setColour(isOver(row) ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
-        g.fillRoundedRectangle(row, 9.0f);
-        g.setColour(juce::Colour(textPrimary));
-        g.setFont(font(14.5f, true));
-        g.drawText(utf("Sincronizar BPM"), row.withTrimmedLeft(12.0f).toNearestInt(), juce::Justification::centredLeft);
-        auto track = juce::Rectangle<float>(40.0f, 22.0f).withCentre({ row.getRight() - 32.0f, row.getCentreY() });
-        if (synced) { g.setGradientFill(accentGradient(track)); } else { g.setColour(juce::Colour(0xff2a2f37)); }
-        g.fillRoundedRectangle(track, 11.0f);
-        g.setColour(juce::Colour(textPrimary));
-        g.fillEllipse(juce::Rectangle<float>(16.0f, 16.0f).withCentre({ synced ? track.getRight() - 11.0f : track.getX() + 11.0f, track.getCentreY() }));
-        if (synced) {
-            g.setColour(juce::Colour(textSecondary));
-            g.setFont(font(12.5f));
-            g.drawText(utf("projeto: ") + juce::String(model.hostBpm()) + " BPM", row.withTrimmedRight(62.0f).toNearestInt(),
-                       juce::Justification::centredRight);
-        }
-
-        for (size_t i = 0; i < bpmValues.size(); ++i) {
-            const auto chip = bpmAreas[i];
-            const bool active = !synced && manual == bpmValues[i];
-            const bool over = isOver(chip);
-            if (active) { g.setGradientFill(accentGradient(chip)); g.fillRoundedRectangle(chip, 8.0f); }
-            else {
-                g.setColour(over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
-                g.fillRoundedRectangle(chip, 8.0f);
-                g.setColour(over ? juce::Colour(orange).withAlpha(0.7f) : juce::Colour(border));
-                g.drawRoundedRectangle(chip.reduced(0.5f), 8.0f, 1.0f);
-            }
-            g.setColour(active ? juce::Colour(0xff160904) : synced ? juce::Colour(textSecondary) : juce::Colour(textPrimary));
-            g.setFont(font(14.5f, true));
-            g.drawText(juce::String(bpmValues[i]), chip, juce::Justification::centred);
-        }
-        g.setColour(juce::Colour(textQuiet));
-        g.setFont(font(12.0f));
-        g.drawText(utf("Escolher um BPM desliga a sincronização"), 16, 226, panelWidth - 32, 18, juce::Justification::centredLeft);
-        divider(g, 254);
-
-        sectionLabel(g, utf("ATUALIZAÇÕES"), 266);
-        auto button = updateButton();
-        const bool over = isOver(button) && !model.checking;
-        g.setColour(over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
-        g.fillRoundedRectangle(button, 9.0f);
-        g.setColour(over ? juce::Colour(orange).withAlpha(0.7f) : juce::Colour(border));
-        g.drawRoundedRectangle(button.reduced(0.5f), 9.0f, 1.0f);
-        drawHistoryIcon(g, juce::Rectangle<float>(20.0f, 20.0f).withCentre({ button.getX() + 22.0f, button.getCentreY() }),
-                        model.checking ? juce::Colour(textQuiet) : juce::Colour(orangeLight));
-        g.setColour(model.checking ? juce::Colour(textSecondary) : juce::Colour(textPrimary));
-        g.setFont(font(14.5f, true));
-        g.drawText(model.checking ? utf("Verificando atualizações...") : utf("Verificar atualizações"),
-                   button.withTrimmedLeft(42.0f).toNearestInt(), juce::Justification::centredLeft);
-
-        g.setColour(juce::Colour(textQuiet));
-        g.setFont(labelFont(11.0f));
-        g.drawText("BY AUDIO MAKERS", 16, 340, panelWidth - 32, 18, juce::Justification::centredLeft);
-    }
-
-    void mouseMove(const juce::MouseEvent& e) override { mouse = e.position; repaint(); }
-    void mouseExit(const juce::MouseEvent&) override { mouse = { -1.0f, -1.0f }; repaint(); }
-    void mouseUp(const juce::MouseEvent& e) override {
-        if (syncRow().contains(e.position)) { model.setSynced(!model.isSynced()); repaint(); return; }
-        for (size_t i = 0; i < bpmValues.size(); ++i)
-            if (bpmAreas[i].contains(e.position)) { model.setManualBpm(bpmValues[i]); repaint(); return; }
-        if (updateButton().contains(e.position) && !model.checking) { *chosen = 1; triggerMenuItem(); }
-    }
-
-private:
-    static constexpr int panelWidth = 320;
-    static constexpr std::array<int, 8> bpmValues { 80, 90, 100, 110, 120, 128, 140, 160 };
-
-    juce::Rectangle<float> syncRow() const { return { 16.0f, 98.0f, (float) panelWidth - 32.0f, 40.0f }; }
-    juce::Rectangle<float> updateButton() const { return { 16.0f, 288.0f, (float) panelWidth - 32.0f, 40.0f }; }
-    bool isOver(juce::Rectangle<float> r) const { return r.contains(mouse); }
-    void divider(juce::Graphics& g, int y) const {
-        g.setColour(juce::Colour(borderQuiet));
-        g.fillRect(16.0f, (float) y, (float) panelWidth - 32.0f, 1.0f);
-    }
-    static void sectionLabel(juce::Graphics& g, const juce::String& text, int y) {
-        g.setColour(juce::Colour(textSecondary));
-        g.setFont(labelFont(11.5f));
-        g.drawText(text, 16, y, 200, 16, juce::Justification::centredLeft);
-    }
-
-    Model model;
-    std::shared_ptr<int> chosen;
-    std::array<juce::Rectangle<float>, 8> bpmAreas {};
-    juce::Point<float> mouse { -1.0f, -1.0f };
-};
-
-// Right-click chord picker: options grouped by scale degree, auditioned on hover.
+// Right-click chord picker. "Campo harmônico" groups the scale's chords by degree;
+// "Todos os acordes" offers every root with every chord quality. Hover auditions.
 class ChordPickerPanel final : public juce::PopupMenu::CustomComponent {
 public:
-    ChordPickerPanel(int slotIndex, int keyRoot, ccp::Chord currentChord, std::vector<ccp::Chord> options,
-                     std::function<void(const ccp::Chord&)> onHover, std::shared_ptr<int> chosenIndex)
-        : juce::PopupMenu::CustomComponent(false), slot(slotIndex), key(keyRoot), current(std::move(currentChord)),
-          choices(std::move(options)), hoverAction(std::move(onHover)), chosen(std::move(chosenIndex)) {
-        for (size_t i = 0; i < choices.size(); ++i) {
-            if (rows.empty() || rows.back().degree != choices[i].degree) rows.push_back({ choices[i].degree, {}, {} });
+    ChordPickerPanel(int slotIndex, int keyRoot, std::array<int, 7> scale, ccp::Chord currentChord,
+                     std::vector<ccp::Chord> diatonicOptions, std::vector<ccp::Chord> allOptions,
+                     std::shared_ptr<bool> showAll, std::function<void(const ccp::Chord&)> onHover,
+                     std::shared_ptr<int> chosenIndex)
+        : juce::PopupMenu::CustomComponent(false), slot(slotIndex), key(keyRoot), scaleNotes(scale),
+          current(std::move(currentChord)), diatonic(std::move(diatonicOptions)), all(std::move(allOptions)),
+          allMode(std::move(showAll)), hoverAction(std::move(onHover)), chosen(std::move(chosenIndex)) {
+        for (size_t i = 0; i < diatonic.size(); ++i) {
+            if (rows.empty() || rows.back().degree != diatonic[i].degree) rows.push_back({ diatonic[i].degree, {}, {} });
             rows.back().items.push_back((int) i);
         }
+        selectedRoot = ((current.root % 12) + 12) % 12;
         layout();
     }
 
@@ -231,56 +107,47 @@ public:
         g.setFont(font(13.0f));
         g.drawText(chordNotes(current), header.withY(header.getY() - 24.0f).withHeight(24.0f), juce::Justification::centredRight);
 
-        g.setColour(juce::Colour(borderQuiet));
-        g.fillRect(16.0f, (float) headerHeight - 1.0f, (float) panelWidth - 32.0f, 1.0f);
-
-        for (const auto& row : rows) {
-            const auto label = row.labelArea;
-            const auto& sample = choices[(size_t) row.items.front()];
-            auto pill = juce::Rectangle<float>(label.getX(), label.getY() + 2.0f, 38.0f, 24.0f);
-            g.setColour(juce::Colour(orange).withAlpha(0.14f));
-            g.fillRoundedRectangle(pill, 12.0f);
-            g.setColour(juce::Colour(orangeLight));
-            g.setFont(font(14.0f, true));
-            g.drawText(romanNumeral(sample), pill, juce::Justification::centred);
-            g.setColour(juce::Colour(textSecondary));
-            g.setFont(labelFont(10.5f));
-            const bool subtonic = row.degree == 6 && ((sample.root - key) % 12 + 12) % 12 == 10;
-            g.drawText(utf(subtonic ? "SUBTÔNICA" : degreeFunctions[(size_t) juce::jlimit(0, 6, row.degree)]),
-                       label.withTrimmedTop(30.0f).withHeight(16.0f), juce::Justification::centredLeft);
+        // Mode toggle.
+        const auto toggle = toggleArea();
+        g.setColour(juce::Colour(0xff0a0c0f));
+        g.fillRoundedRectangle(toggle, 10.0f);
+        g.setColour(juce::Colour(border));
+        g.drawRoundedRectangle(toggle.reduced(0.5f), 10.0f, 1.0f);
+        for (int i = 0; i < 2; ++i) {
+            const auto segment = toggleSegment(i);
+            const bool active = (i == 1) == *allMode;
+            if (active) { g.setGradientFill(accentGradient(segment)); g.fillRoundedRectangle(segment, 8.0f); }
+            else if (segment.contains(mouse)) { g.setColour(juce::Colour(surfaceHover)); g.fillRoundedRectangle(segment, 8.0f); }
+            g.setColour(active ? juce::Colour(0xff160904) : juce::Colour(textSecondary));
+            g.setFont(labelFont(12.0f));
+            g.drawText(i == 0 ? utf("CAMPO HARMÔNICO") : utf("TODOS OS ACORDES"), segment, juce::Justification::centred);
         }
 
-        for (size_t i = 0; i < chipAreas.size(); ++i) {
-            const auto& chord = choices[i];
-            auto chip = chipAreas[i];
-            const bool isCurrent = chord.degree == current.degree && chord.kind == current.kind;
-            const bool isHover = (int) i == hovered;
-            if (isHover) {
-                g.setGradientFill(accentGradient(chip));
-                g.fillRoundedRectangle(chip, 8.0f);
-            } else {
-                g.setColour(isCurrent ? juce::Colour(orange).withAlpha(0.12f) : juce::Colour(surfaceRaised));
-                g.fillRoundedRectangle(chip, 8.0f);
-                g.setColour(isCurrent ? juce::Colour(orange) : juce::Colour(border));
-                g.drawRoundedRectangle(chip.reduced(0.5f), 8.0f, 1.0f);
-            }
-            g.setColour(isHover ? juce::Colour(0xff160904) : isCurrent ? juce::Colour(orangeLight) : juce::Colour(textPrimary));
-            g.setFont(font(14.0f, true));
-            g.drawFittedText(utf(chord.name.c_str()), chip.toNearestInt().reduced(6, 0), juce::Justification::centred, 1, 0.75f);
-        }
+        if (*allMode) paintAll(g); else paintDiatonic(g);
 
         auto footer = getLocalBounds().toFloat().removeFromBottom((float) footerHeight).reduced(16.0f, 0.0f);
         g.setColour(juce::Colour(textQuiet));
         g.setFont(font(12.5f));
-        const auto hint = hovered >= 0 ? utf("Ouvindo ") + utf(choices[(size_t) hovered].name.c_str()) + utf("  ·  clique para usar")
+        const auto hint = hovered >= 0 ? utf("Ouvindo ") + utf(option(hovered).name.c_str()) + utf("  ·  clique para usar")
                                        : utf("Passe o mouse para ouvir  ·  clique para trocar");
         g.drawText(hint, footer, juce::Justification::centredLeft);
     }
 
-    void mouseMove(const juce::MouseEvent& e) override { setHovered(chipAt(e.position)); }
-    void mouseDrag(const juce::MouseEvent& e) override { setHovered(chipAt(e.position)); }
-    void mouseExit(const juce::MouseEvent&) override { setHovered(-1); }
+    void mouseMove(const juce::MouseEvent& e) override { mouse = e.position; setHovered(chipAt(e.position)); repaint(); }
+    void mouseDrag(const juce::MouseEvent& e) override { mouse = e.position; setHovered(chipAt(e.position)); }
+    void mouseExit(const juce::MouseEvent&) override { mouse = { -1.0f, -1.0f }; setHovered(-1); repaint(); }
     void mouseUp(const juce::MouseEvent& e) override {
+        for (int i = 0; i < 2; ++i)
+            if (toggleSegment(i).contains(e.position)) { *allMode = i == 1; hovered = -1; repaint(); return; }
+        if (*allMode)
+            for (int root = 0; root < 12; ++root)
+                if (rootAreas[(size_t) root].contains(e.position)) {
+                    selectedRoot = root;
+                    hovered = -1;
+                    repaint();
+                    if (hoverAction) hoverAction(all[(size_t) (root * ccp::chromaticQualityCount + previewQuality())]);
+                    return;
+                }
         const int index = chipAt(e.position);
         if (index < 0) return;
         *chosen = index;
@@ -290,30 +157,133 @@ public:
 private:
     static constexpr const char* degreeFunctions[] { "TÔNICA", "SUPERTÔNICA", "MEDIANTE", "SUBDOMINANTE",
                                                      "DOMINANTE", "SUBMEDIANTE", "SENSÍVEL" };
+    static constexpr const char* noteNames[] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     static constexpr int chipsPerLine = 6, chipWidth = 76, chipHeight = 30, chipGap = 6;
-    static constexpr int labelWidth = 104, headerHeight = 66, footerHeight = 34;
+    static constexpr int labelWidth = 104, headerHeight = 66, toggleHeight = 34, footerHeight = 34;
     static constexpr int panelWidth = 16 + labelWidth + chipsPerLine * chipWidth + (chipsPerLine - 1) * chipGap + 16;
+    static constexpr int contentTop = headerHeight + 12 + toggleHeight + 12;
 
     struct Row { int degree; std::vector<int> items; juce::Rectangle<float> labelArea; };
 
+    juce::Rectangle<float> toggleArea() const { return { 16.0f, (float) headerHeight + 12.0f, (float) panelWidth - 32.0f, (float) toggleHeight }; }
+    juce::Rectangle<float> toggleSegment(int i) const {
+        auto r = toggleArea().reduced(3.0f);
+        return i == 0 ? r.removeFromLeft(r.getWidth() * 0.5f) : r.withTrimmedLeft(r.getWidth() * 0.5f);
+    }
+
+    const ccp::Chord& option(int index) const {
+        return index < (int) diatonic.size() ? diatonic[(size_t) index] : all[(size_t) (index - (int) diatonic.size())];
+    }
+
+    int previewQuality() const {
+        if (current.quality >= 0) return current.quality;
+        const auto suffix = utf(current.name.c_str()).substring(1).trimCharactersAtStart("#b");
+        return suffix.startsWithChar('m') && !suffix.startsWith("maj") ? 1 : 0;
+    }
+
+    juce::Rectangle<float> chipBounds(int line, int column, int y) const {
+        return { (float) (16 + labelWidth + column * (chipWidth + chipGap)), (float) (y + line * (chipHeight + chipGap)),
+                 (float) chipWidth, (float) chipHeight };
+    }
+
     void layout() {
-        chipAreas.assign(choices.size(), {});
-        int y = headerHeight + 12;
+        chipAreas.assign(diatonic.size(), {});
+        int y = contentTop;
         for (auto& row : rows) {
             row.labelArea = { 16.0f, (float) y, (float) labelWidth - 8.0f, 48.0f };
-            for (size_t n = 0; n < row.items.size(); ++n) {
-                const int line = (int) n / chipsPerLine, column = (int) n % chipsPerLine;
-                chipAreas[(size_t) row.items[n]] = { (float) (16 + labelWidth + column * (chipWidth + chipGap)),
-                                                     (float) (y + line * (chipHeight + chipGap)),
-                                                     (float) chipWidth, (float) chipHeight };
-            }
+            for (size_t n = 0; n < row.items.size(); ++n)
+                chipAreas[(size_t) row.items[n]] = chipBounds((int) n / chipsPerLine, (int) n % chipsPerLine, y);
             const int lines = ((int) row.items.size() + chipsPerLine - 1) / chipsPerLine;
             y += juce::jmax(48, lines * (chipHeight + chipGap) - chipGap) + 14;
         }
-        totalHeight = y + footerHeight - 6;
+        const int diatonicHeight = y;
+
+        y = contentTop;
+        rootLabel = { 16.0f, (float) y, (float) labelWidth - 8.0f, 48.0f };
+        for (int root = 0; root < 12; ++root) rootAreas[(size_t) root] = chipBounds(root / chipsPerLine, root % chipsPerLine, y);
+        y += 2 * (chipHeight + chipGap) - chipGap + 18;
+        qualityLabel = { 16.0f, (float) y, (float) labelWidth - 8.0f, 48.0f };
+        for (int q = 0; q < ccp::chromaticQualityCount; ++q) qualityAreas[(size_t) q] = chipBounds(q / chipsPerLine, q % chipsPerLine, y);
+        y += ((ccp::chromaticQualityCount + chipsPerLine - 1) / chipsPerLine) * (chipHeight + chipGap) - chipGap + 14;
+
+        totalHeight = juce::jmax(diatonicHeight, y) + footerHeight - 6;
+    }
+
+    void paintChip(juce::Graphics& g, juce::Rectangle<float> chip, const juce::String& text, bool isCurrent, bool isHover,
+                   bool marked = false) const {
+        if (isHover) {
+            g.setGradientFill(accentGradient(chip));
+            g.fillRoundedRectangle(chip, 8.0f);
+        } else {
+            g.setColour(isCurrent ? juce::Colour(orange).withAlpha(0.12f) : juce::Colour(surfaceRaised));
+            g.fillRoundedRectangle(chip, 8.0f);
+            g.setColour(isCurrent ? juce::Colour(orange) : juce::Colour(border));
+            g.drawRoundedRectangle(chip.reduced(0.5f), 8.0f, 1.0f);
+        }
+        if (marked && !isHover) {
+            g.setColour(juce::Colour(orangeLight).withAlpha(0.8f));
+            g.fillEllipse(juce::Rectangle<float>(4.0f, 4.0f).withCentre({ chip.getCentreX(), chip.getBottom() - 5.0f }));
+        }
+        g.setColour(isHover ? juce::Colour(0xff160904) : isCurrent ? juce::Colour(orangeLight) : juce::Colour(textPrimary));
+        g.setFont(font(14.0f, true));
+        g.drawFittedText(text, chip.toNearestInt().reduced(6, 0), juce::Justification::centred, 1, 0.75f);
+    }
+
+    void paintRowLabel(juce::Graphics& g, juce::Rectangle<float> label, const juce::String& pillText, const juce::String& caption) const {
+        if (pillText.isNotEmpty()) {
+            auto pill = juce::Rectangle<float>(label.getX(), label.getY() + 2.0f, 38.0f, 24.0f);
+            g.setColour(juce::Colour(orange).withAlpha(0.14f));
+            g.fillRoundedRectangle(pill, 12.0f);
+            g.setColour(juce::Colour(orangeLight));
+            g.setFont(font(14.0f, true));
+            g.drawText(pillText, pill, juce::Justification::centred);
+        }
+        g.setColour(juce::Colour(textSecondary));
+        g.setFont(labelFont(10.5f));
+        g.drawText(caption, label.withTrimmedTop(pillText.isNotEmpty() ? 30.0f : 6.0f).withHeight(16.0f), juce::Justification::centredLeft);
+    }
+
+    void paintDiatonic(juce::Graphics& g) const {
+        for (const auto& row : rows) {
+            const auto& sample = diatonic[(size_t) row.items.front()];
+            const bool subtonic = row.degree == 6 && ((sample.root - key) % 12 + 12) % 12 == 10;
+            paintRowLabel(g, row.labelArea, romanNumeral(sample, key),
+                          utf(subtonic ? "SUBTÔNICA" : degreeFunctions[(size_t) juce::jlimit(0, 6, row.degree)]));
+        }
+        for (size_t i = 0; i < chipAreas.size(); ++i) {
+            const auto& chord = diatonic[i];
+            const bool isCurrent = current.quality < 0 && chord.degree == current.degree && chord.kind == current.kind;
+            paintChip(g, chipAreas[i], utf(chord.name.c_str()), isCurrent, (int) i == hovered);
+        }
+    }
+
+    void paintAll(juce::Graphics& g) const {
+        paintRowLabel(g, rootLabel, {}, "FUNDAMENTAL");
+        g.setColour(juce::Colour(textQuiet));
+        g.setFont(font(11.5f));
+        g.drawFittedText(utf("• no tom"), rootLabel.withTrimmedTop(24.0f).withHeight(16.0f).toNearestInt(),
+                         juce::Justification::centredLeft, 1);
+        for (int root = 0; root < 12; ++root) {
+            const bool inScale = std::find(scaleNotes.begin(), scaleNotes.end(), root) != scaleNotes.end();
+            paintChip(g, rootAreas[(size_t) root], noteNames[root], root == selectedRoot,
+                      rootAreas[(size_t) root].contains(mouse), inScale);
+        }
+        paintRowLabel(g, qualityLabel, {}, "ACORDE");
+        for (int q = 0; q < ccp::chromaticQualityCount; ++q) {
+            const int index = (int) diatonic.size() + selectedRoot * ccp::chromaticQualityCount + q;
+            const auto& chord = option(index);
+            const bool isCurrent = (current.root % 12 + 12) % 12 == selectedRoot
+                && (current.quality >= 0 ? current.quality == q : utf(current.name.c_str()) == utf(chord.name.c_str()));
+            paintChip(g, qualityAreas[(size_t) q], utf(chord.name.c_str()), isCurrent, index == hovered);
+        }
     }
 
     int chipAt(juce::Point<float> p) const {
+        if (*allMode) {
+            for (int q = 0; q < ccp::chromaticQualityCount; ++q)
+                if (qualityAreas[(size_t) q].contains(p)) return (int) diatonic.size() + selectedRoot * ccp::chromaticQualityCount + q;
+            return -1;
+        }
         for (size_t i = 0; i < chipAreas.size(); ++i)
             if (chipAreas[i].contains(p)) return (int) i;
         return -1;
@@ -323,16 +293,22 @@ private:
         if (index == hovered) return;
         hovered = index;
         repaint();
-        if (index >= 0 && hoverAction) hoverAction(choices[(size_t) index]);
+        if (index >= 0 && hoverAction) hoverAction(option(index));
     }
 
-    int slot {}, key {};
+    int slot {}, key {}, selectedRoot {};
+    std::array<int, 7> scaleNotes {};
     ccp::Chord current;
-    std::vector<ccp::Chord> choices;
+    std::vector<ccp::Chord> diatonic, all;
+    std::shared_ptr<bool> allMode;
     std::vector<Row> rows;
     std::vector<juce::Rectangle<float>> chipAreas;
+    std::array<juce::Rectangle<float>, 12> rootAreas {};
+    std::array<juce::Rectangle<float>, ccp::chromaticQualityCount> qualityAreas {};
+    juce::Rectangle<float> rootLabel, qualityLabel;
     std::function<void(const ccp::Chord&)> hoverAction;
     std::shared_ptr<int> chosen;
+    juce::Point<float> mouse { -1.0f, -1.0f };
     int hovered { -1 }, totalHeight {};
 };
 }
@@ -489,7 +465,7 @@ void ChordCardComponent::paint(juce::Graphics& g) {
                      juce::Justification::centred, 1, 0.82f);
 
     if (available) {
-        const auto numeral = romanNumeral(chord);
+        const auto numeral = romanNumeral(chord, keyRoot);
         g.setFont(font(17.0f, true));
         const float numeralWidth = (float) juce::GlyphArrangement::getStringWidthInt(font(17.0f, true), numeral) + 18.0f;
         const auto notes = chordNotes(chord);
@@ -713,13 +689,32 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     drag.dragAction = [this] { exportDrag(); };
     save.onClick = [this] { saveMidi(); };
 
+    addChildComponent(overlay);
+    overlay.onDismiss = [this] { content.setEnabled(true); };
+    showAllChords = std::make_shared<bool>((bool) pro.apvts.state.getProperty("chordPickerAllChords", false));
+    license->addChangeListener(this);
+
     refresh();
     startTimerHz(30);
+    juce::MessageManager::callAsync([safe = juce::Component::SafePointer<ChordCodeProEditor>(this)] {
+        if (safe != nullptr) safe->checkLicense();
+    });
+
+    // Silent update check each time the editor opens; failures (offline) show nothing.
+    if (const auto fake = juce::SystemStats::getEnvironmentVariable("CHORDCODE_FAKE_UPDATE", {}); fake.isNotEmpty())
+        setUpdateAvailable(true);
+    else
+        backgroundUpdateCheck.start(JucePlugin_VersionString,
+            [safe = juce::Component::SafePointer<ChordCodeProEditor>(this)](UpdateChecker::Result result) {
+                if (safe != nullptr && result.succeeded) safe->setUpdateAvailable(result.updateAvailable);
+            });
 }
 
 ChordCodeProEditor::~ChordCodeProEditor() {
     stopTimer();
+    license->removeChangeListener(this);
     updateChecker.cancelAndWait();
+    backgroundUpdateCheck.cancelAndWait();
     chooser.reset();
     for (auto& card : cards) { card.onSelect = {}; card.onPlay = {}; card.onRegenerate = {}; card.onLock = {}; card.onShowChordChoices = {}; }
     pro.stopPreview();
@@ -772,15 +767,6 @@ void ChordCodeProEditor::paint(juce::Graphics& g) {
                                            juce::Colour(amber), codeArea.getRight(), 0.0f, false));
     g.drawText("CODE", codeArea, juce::Justification::centredLeft);
 
-    auto versionPill = juce::Rectangle<float>(1384.0f, 33.0f, 64.0f, 26.0f);
-    g.setColour(juce::Colour(surfaceRaised));
-    g.fillRoundedRectangle(versionPill, 13.0f);
-    g.setColour(juce::Colour(border));
-    g.drawRoundedRectangle(versionPill, 13.0f, 1.0f);
-    g.setColour(juce::Colour(textSecondary));
-    g.setFont(font(15.0f, true));
-    g.drawText("v" JucePlugin_VersionString, versionPill, juce::Justification::centred);
-
     {
         juce::ColourGradient line(juce::Colour(divider).withAlpha(0.0f), 30.0f, 0.0f,
                                   juce::Colour(divider).withAlpha(0.0f), 1506.0f, 0.0f, false);
@@ -810,6 +796,7 @@ void ChordCodeProEditor::paint(juce::Graphics& g) {
 }
 
 void ChordCodeProEditor::resized() {
+    overlay.setBounds(getLocalBounds());
     content.setBounds(0, 0, designWidth, designHeight);
     content.setTransform(juce::AffineTransform::scale(editorScale));
     settings.setBounds(1465, 29, 38, 38);
@@ -819,7 +806,7 @@ void ChordCodeProEditor::resized() {
 
     const int margin = (int) ChordCardComponent::glowMargin;
     cardsViewport.setBounds(34 - margin, 332 - margin, 1288 + margin * 2, 252 + margin * 2);
-    status.setBounds(1000, 30, 370, 32);
+    status.setBounds(1040, 30, 405, 32);
     layoutChordPages();
     continueCard.setBounds(1358, 332, 142, 252);
 
@@ -833,7 +820,14 @@ void ChordCodeProEditor::resized() {
     history.setBounds(942, 758, 168, 84); drag.setBounds(1120, 758, 190, 84); save.setBounds(1322, 758, 178, 84);
 }
 
+void ChordCodeProEditor::setUpdateAvailable(bool available) {
+    updateAvailable = available;
+    settings.getProperties().set("updateDot", available);
+    settings.repaint();
+}
+
 void ChordCodeProEditor::timerCallback() {
+    if (updateAvailable) settings.repaint();   // keeps the yellow dot pulsing
     const int now = pro.activeChord();
     animationPhase += 0.28f;
     if (animationPhase > juce::MathConstants<float>::twoPi)
@@ -844,6 +838,7 @@ void ChordCodeProEditor::timerCallback() {
         cards[(size_t) i].advanceAnimation();
     }
     status.setLive(now >= 0, animationPhase);
+    if (++licenseTicks >= 30 * 60) { licenseTicks = 0; license->revalidate(); }
     if (now != lastPlaying) {
         lastPlaying = now;
         play.setButtonText(now >= 0 ? "PARAR" : "REPRODUZIR");
@@ -905,6 +900,7 @@ void ChordCodeProEditor::refresh() {
         cards[(size_t) slot].setSlot(slot);
         cards[(size_t) slot].setVisible(slot < 4 || progression.chordCount > 4);
         cards[(size_t) slot].setAvailable(slot < progression.chordCount);
+        cards[(size_t) slot].setKeyRoot(progression.settings.key);
         if (slot < progression.chordCount) cards[(size_t) slot].setChord(progression.chords[(size_t) slot]);
         cards[(size_t) slot].setLocked(pro.isLocked(slot));
         cards[(size_t) slot].setSelected(slot == selectedSlot);
@@ -982,27 +978,39 @@ void ChordCodeProEditor::showHistory() {
 void ChordCodeProEditor::showChordChoices(int slot) {
     const auto choices = pro.chordChoices(slot);
     if (choices.empty()) return;
+    auto everyChord = pro.allChordChoices(slot);
+    auto options = choices;
+    options.insert(options.end(), everyChord.begin(), everyChord.end());
+    const auto progression = pro.getProgression();
 
     juce::PopupMenu menu;
     menu.setLookAndFeel(&laf);
     juce::Component::SafePointer<ChordCodeProEditor> safe(this);
     auto chosen = std::make_shared<int>(-1);
     menu.addCustomItem(1, std::make_unique<ChordPickerPanel>(
-        slot, pro.getProgression().settings.key, pro.getProgression().chords[(size_t) slot], choices,
+        slot, progression.settings.key, ccp::HarmonyEngine::scaleNotes(progression.settings.key, progression.settings.scale),
+        progression.chords[(size_t) slot], choices, std::move(everyChord), showAllChords,
         [safe, slot](const ccp::Chord& choice) { if (safe != nullptr) safe->pro.auditionChord(slot, choice); },
         chosen), nullptr, utf("Trocar acorde"));
 
     menu.showMenuAsync(juce::PopupMenu::Options().withParentComponent(this)
                                                    .withTargetComponent(this)
                                                    .withTargetScreenArea(cards[(size_t) slot].getScreenBounds()),
-        [safe, slot, choices, chosen](int result) {
+        [safe, slot, options, chosen](int result) {
             if (safe == nullptr) return;
             safe->pro.stopPreview();
-            if (result == 1 && *chosen >= 0 && *chosen < (int) choices.size()) {
-                safe->pro.chooseChord(slot, choices[(size_t) *chosen]);
+            safe->pro.apvts.state.setProperty("chordPickerAllChords", *safe->showAllChords, nullptr);
+            if (result == 1 && *chosen >= 0 && *chosen < (int) options.size()) {
+                safe->pro.chooseChord(slot, options[(size_t) *chosen]);
                 safe->refresh();
             }
         });
+}
+
+void ChordCodeProEditor::presentPanel(std::unique_ptr<juce::Component> panel, bool dismissable) {
+    content.setEnabled(false);
+    overlay.present(*this, std::move(panel), dismissable, panelScale);
+    overlay.grabKeyboardFocus();
 }
 
 void ChordCodeProEditor::showSettings() {
@@ -1024,54 +1032,63 @@ void ChordCodeProEditor::showSettings() {
             param->setValueNotifyingHost(param->convertTo0to1((float) bpm));
         safe->updateStatus();
     };
-    model.checking = updateChecker.isChecking();
-
-    auto chosen = std::make_shared<int>(0);
-    juce::PopupMenu menu;
-    menu.setLookAndFeel(&laf);
-    menu.addCustomItem(1, std::make_unique<SettingsPanel>(std::move(model), chosen), nullptr, utf("Configurações"));
-    menu.showMenuAsync(juce::PopupMenu::Options().withParentComponent(this)
-                                                   .withTargetComponent(this)
-                                                   .withTargetScreenArea(settings.getScreenBounds()),
-        [safe, chosen](int result) {
-            if (safe != nullptr && result == 1 && *chosen == 1) safe->checkForUpdates();
-        });
+    model.licenseEmail = [safe] { return safe != nullptr ? safe->license->getEmail() : juce::String(); };
+    model.updateAvailable = [safe] { return safe != nullptr && safe->updateAvailable; };
+    model.checkForUpdates = [safe] { if (safe != nullptr) safe->checkForUpdates(); };
+    model.changeLicense = [safe] { if (safe != nullptr) safe->showLicense(LicensePanel::Mode::change); };
+    model.close = [safe] { if (safe != nullptr) safe->overlay.dismiss(); };
+    presentPanel(std::make_unique<SettingsPanel>(std::move(model)), true);
 }
 
 void ChordCodeProEditor::checkForUpdates() {
-    if (updateChecker.isChecking()) return;
+    auto panel = std::make_unique<UpdatePanel>();
     juce::Component::SafePointer<ChordCodeProEditor> safe(this);
+    panel->onClose = [safe] { if (safe != nullptr) safe->overlay.dismiss(); };
+    panel->onRetry = [safe] { if (safe != nullptr) safe->checkForUpdates(); };
+    presentPanel(std::move(panel), true);
+    if (updateChecker.isChecking()) return;
     updateChecker.start(JucePlugin_VersionString, [safe](UpdateChecker::Result result) mutable {
         if (safe != nullptr) safe->showUpdateResult(std::move(result));
     });
 }
 
 void ChordCodeProEditor::showUpdateResult(UpdateChecker::Result result) {
-    if (!result.succeeded) {
-        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-            "CHORD CODE PRO", result.error, "OK", this);
+    if (result.succeeded) setUpdateAvailable(result.updateAvailable);
+    auto* panel = dynamic_cast<UpdatePanel*>(overlay.getPanel());
+    if (panel == nullptr) return;
+    UpdatePanel::Info info { result.installedVersion, result.latestVersion, result.releaseNotes, result.error, result.downloadUrl };
+    panel->setState(!result.succeeded ? UpdatePanel::State::failed
+                    : result.updateAvailable ? UpdatePanel::State::available : UpdatePanel::State::upToDate, info);
+}
+
+void ChordCodeProEditor::checkLicense() {
+    const auto licenseStatus = license->getStatus();
+    if (licenseStatus == LicenseManager::Status::active) {
+        if (dynamic_cast<LicensePanel*>(overlay.getPanel()) != nullptr) overlay.dismiss();
+        license->revalidate(true);
         return;
     }
+    if (auto* current = dynamic_cast<LicensePanel*>(overlay.getPanel()); current != nullptr && current->isLocked()) return;
+    showLicense(licenseStatus == LicenseManager::Status::revoked ? LicensePanel::Mode::revoked : LicensePanel::Mode::activate);
+}
 
-    if (!result.updateAvailable) {
-        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
-            "CHORD CODE PRO", utf("Você já está usando a versão mais recente.\n\nVersão instalada: ")
-                + result.installedVersion, "OK", this);
-        return;
-    }
-
-    auto message = utf("Uma nova atualização está disponível.\n\nVersão instalada: ") + result.installedVersion
-        + utf("\nNova versão: ") + result.latestVersion;
-    if (result.releaseNotes.isNotEmpty()) message += "\n\n" + result.releaseNotes;
-    const auto options = juce::MessageBoxOptions()
-        .withIconType(juce::MessageBoxIconType::InfoIcon)
-        .withTitle(utf("Nova atualização disponível"))
-        .withMessage(message)
-        .withButton(utf("IR PARA DOWNLOAD"))
-        .withButton(utf("AGORA NÃO"))
-        .withAssociatedComponent(this);
+void ChordCodeProEditor::showLicense(LicensePanel::Mode mode) {
+    auto panel = std::make_unique<LicensePanel>(mode, license->getEmail());
     juce::Component::SafePointer<ChordCodeProEditor> safe(this);
-    juce::AlertWindow::showAsync(options, [safe, url = result.downloadUrl](int button) {
-        if (safe != nullptr && button == 1) juce::URL(url).launchInDefaultBrowser();
-    });
+    juce::Component::SafePointer<LicensePanel> safePanel(panel.get());
+    panel->onSubmit = [safe, safePanel](juce::String email) {
+        if (safe == nullptr) return;
+        safe->license->activate(email, [safe, safePanel](LicenseManager::Outcome outcome) {
+            const bool ok = outcome.kind == LicenseManager::Outcome::Kind::authorized;
+            if (safePanel != nullptr) safePanel->finish(ok, outcome.message);
+            if (ok && safe != nullptr && safe->overlay.getPanel() == safePanel.getComponent()) safe->overlay.dismiss();
+        });
+    };
+    panel->onCancel = [safe] { if (safe != nullptr) safe->showSettings(); };
+    presentPanel(std::move(panel), mode == LicensePanel::Mode::change);
+}
+
+void ChordCodeProEditor::changeListenerCallback(juce::ChangeBroadcaster*) {
+    // A revoked license locks the window again; a new activation is handled by its panel.
+    if (license->getStatus() != LicenseManager::Status::active) checkLicense();
 }

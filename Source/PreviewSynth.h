@@ -18,7 +18,7 @@ private:
   void set(double w,float a,float d){re=1;im=0;cr=std::cos(w);ci=std::sin(w);amp=a;decay=d;}
   float tick(){const double r=re*cr-im*ci;im=re*ci+im*cr;re=r;const float out=(float)im*amp;amp*=decay;return out;}
   void renormalise(){const double m=1.0/std::sqrt(re*re+im*im);re*=m;im*=m;}};
- float renderPiano();float renderRhodes();float renderOrgan(float&pan);float renderSaw(float&left,float&right);
+ float renderRhodes();float renderOrgan(float&pan);float renderSaw(float&left,float&right);
  float noise(){return rng.nextFloat()*2.0f-1.0f;}
  void updateFilter();
  ccp::Timbre timbre{ccp::Timbre::electricPiano},nextTimbre{ccp::Timbre::electricPiano};
@@ -34,8 +34,9 @@ public:
  PreviewSynth();void prepare(double,int maximumBlockSize=512);void render(juce::AudioBuffer<float>&,juce::MidiBuffer&);void allNotesOff(bool allowTailOff=true);bool isActive() const;void setTimbre(ccp::Timbre);
 private:
  static void addSample(juce::Synthesiser&,const char*,const void*,int,int);
- juce::Synthesiser procedural,pad,violin,flute;
+ static void addPiano(juce::Synthesiser&);
+ juce::Synthesiser procedural,piano,pad,violin,flute;
  juce::AudioBuffer<float> scratch;
  juce::MidiBuffer chunkEvents;
- ccp::Timbre current{ccp::Timbre::electricPiano};
+ ccp::Timbre current{ccp::Timbre::piano};
 };
