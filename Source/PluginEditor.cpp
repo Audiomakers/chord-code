@@ -699,12 +699,22 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     juce::MessageManager::callAsync([safe = juce::Component::SafePointer<ChordCodeProEditor>(this)] {
         if (safe != nullptr) safe->checkLicense();
     });
+
+    // Silent update check each time the editor opens; failures (offline) show nothing.
+    if (const auto fake = juce::SystemStats::getEnvironmentVariable("CHORDCODE_FAKE_UPDATE", {}); fake.isNotEmpty())
+        setUpdateAvailable(true);
+    else
+        backgroundUpdateCheck.start(JucePlugin_VersionString,
+            [safe = juce::Component::SafePointer<ChordCodeProEditor>(this)](UpdateChecker::Result result) {
+                if (safe != nullptr && result.succeeded) safe->setUpdateAvailable(result.updateAvailable);
+            });
 }
 
 ChordCodeProEditor::~ChordCodeProEditor() {
     stopTimer();
     license->removeChangeListener(this);
     updateChecker.cancelAndWait();
+    backgroundUpdateCheck.cancelAndWait();
     chooser.reset();
     for (auto& card : cards) { card.onSelect = {}; card.onPlay = {}; card.onRegenerate = {}; card.onLock = {}; card.onShowChordChoices = {}; }
     pro.stopPreview();
@@ -810,7 +820,14 @@ void ChordCodeProEditor::resized() {
     history.setBounds(942, 758, 168, 84); drag.setBounds(1120, 758, 190, 84); save.setBounds(1322, 758, 178, 84);
 }
 
+void ChordCodeProEditor::setUpdateAvailable(bool available) {
+    updateAvailable = available;
+    settings.getProperties().set("updateDot", available);
+    settings.repaint();
+}
+
 void ChordCodeProEditor::timerCallback() {
+    if (updateAvailable) settings.repaint();   // keeps the yellow dot pulsing
     const int now = pro.activeChord();
     animationPhase += 0.28f;
     if (animationPhase > juce::MathConstants<float>::twoPi)
@@ -1016,6 +1033,7 @@ void ChordCodeProEditor::showSettings() {
         safe->updateStatus();
     };
     model.licenseEmail = [safe] { return safe != nullptr ? safe->license->getEmail() : juce::String(); };
+    model.updateAvailable = [safe] { return safe != nullptr && safe->updateAvailable; };
     model.checkForUpdates = [safe] { if (safe != nullptr) safe->checkForUpdates(); };
     model.changeLicense = [safe] { if (safe != nullptr) safe->showLicense(LicensePanel::Mode::change); };
     model.close = [safe] { if (safe != nullptr) safe->overlay.dismiss(); };
@@ -1035,6 +1053,7 @@ void ChordCodeProEditor::checkForUpdates() {
 }
 
 void ChordCodeProEditor::showUpdateResult(UpdateChecker::Result result) {
+    if (result.succeeded) setUpdateAvailable(result.updateAvailable);
     auto* panel = dynamic_cast<UpdatePanel*>(overlay.getPanel());
     if (panel == nullptr) return;
     UpdatePanel::Info info { result.installedVersion, result.latestVersion, result.releaseNotes, result.error, result.downloadUrl };

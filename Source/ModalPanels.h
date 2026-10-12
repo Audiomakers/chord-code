@@ -38,11 +38,12 @@ public:
         setMouseCursor(juce::MouseCursor::PointingHandCursor);
     }
     void paintButton(juce::Graphics&, bool over, bool down) override;
+    bool showUpdateDot {};
 private:
     bool primary {};
 };
 
-class SettingsPanel final : public juce::Component {
+class SettingsPanel final : public juce::Component, private juce::Timer {
 public:
     struct Model {
         std::function<bool()> isSynced;
@@ -50,6 +51,7 @@ public:
         std::function<void(bool)> setSynced;
         std::function<void(int)> setManualBpm;
         std::function<juce::String()> licenseEmail;
+        std::function<bool()> updateAvailable;
         std::function<void()> checkForUpdates, changeLicense, close;
     };
     explicit SettingsPanel(Model);
@@ -60,6 +62,7 @@ public:
     void mouseUp(const juce::MouseEvent&) override;
 
 private:
+    void timerCallback() override { updates.repaint(); }
     static constexpr int panelWidth = 340;
     static constexpr std::array<int, 8> bpmValues { 80, 90, 100, 110, 120, 128, 140, 160 };
     juce::Rectangle<float> syncRow() const { return { 18.0f, 100.0f, (float) panelWidth - 36.0f, 40.0f }; }

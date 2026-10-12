@@ -175,12 +175,14 @@ void PanelButton::paintButton(juce::Graphics& g, bool over, bool down) {
     } else {
         g.setColour(over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
         g.fillRoundedRectangle(r, radius);
-        g.setColour(over ? juce::Colour(orange).withAlpha(0.7f) : juce::Colour(border));
+        g.setColour(over ? juce::Colour(orange).withAlpha(0.7f)
+                    : showUpdateDot ? juce::Colour(updateYellow).withAlpha(0.5f) : juce::Colour(border));
         g.drawRoundedRectangle(r, radius, 1.0f);
         g.setColour(isEnabled() ? juce::Colour(textPrimary) : juce::Colour(textSecondary));
     }
     g.setFont(font(14.5f, true));
     g.drawText(getButtonText(), getLocalBounds(), juce::Justification::centred);
+    if (showUpdateDot) drawUpdateDot(g, { 22.0f, (float) getHeight() * 0.5f });
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +196,8 @@ SettingsPanel::SettingsPanel(Model m) : model(std::move(m)) {
     }
     addAndMakeVisible(updates);
     updates.onClick = [this] { if (model.checkForUpdates) model.checkForUpdates(); };
+    updates.showUpdateDot = model.updateAvailable && model.updateAvailable();
+    if (updates.showUpdateDot) startTimerHz(30);
     setSize(panelWidth, 494);
 }
 

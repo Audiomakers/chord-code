@@ -78,6 +78,8 @@ void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool
     const auto id = b.getComponentID();
     if (id == "settings") {
         drawSvg(g, settingsIcon.get(), b.getLocalBounds().toFloat().reduced(1.0f));
+        if ((bool) b.getProperties().getWithDefault("updateDot", false))
+            drawUpdateDot(g, { (float) b.getWidth() - 5.0f, 5.0f });
         return;
     }
     const bool primary = id == "generate";

@@ -137,7 +137,9 @@ private:
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, 10> comboAttachments;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> velocityAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
-    UpdateChecker updateChecker;
+    UpdateChecker updateChecker, backgroundUpdateCheck;
+    bool updateAvailable {};
+    void setUpdateAvailable(bool);
     juce::SharedResourcePointer<LicenseManager> license;
     ModalOverlay overlay;
     std::shared_ptr<bool> showAllChords;
