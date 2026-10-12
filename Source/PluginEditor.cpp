@@ -65,6 +65,139 @@ juce::String chordFileStem(const ccp::Progression& progression) {
     return names.joinIntoString("-").substring(0, 120);
 }
 
+// Settings panel: same card language as the chord picker; tempo changes apply live.
+class SettingsPanel final : public juce::PopupMenu::CustomComponent {
+public:
+    struct Model {
+        std::function<bool()> isSynced;
+        std::function<int()> manualBpm, hostBpm;
+        std::function<void(bool)> setSynced;
+        std::function<void(int)> setManualBpm;
+        bool checking {};
+    };
+
+    SettingsPanel(Model m, std::shared_ptr<int> chosenAction)
+        : juce::PopupMenu::CustomComponent(false), model(std::move(m)), chosen(std::move(chosenAction)) {
+        int x = 16, y = 150;
+        for (size_t i = 0; i < bpmValues.size(); ++i) {
+            bpmAreas[i] = { (float) x, (float) y, 66.0f, 32.0f };
+            x += 72;
+            if (i == 3) { x = 16; y += 38; }
+        }
+    }
+
+    void getIdealSize(int& width, int& height) override { width = panelWidth; height = 366; }
+
+    void paint(juce::Graphics& g) override {
+        g.fillAll(juce::Colour(surface));
+        const bool synced = model.isSynced();
+        const int manual = model.manualBpm();
+
+        g.setColour(juce::Colour(textSecondary));
+        g.setFont(labelFont(12.0f));
+        g.drawText(utf("CONFIGURAÇÕES"), 16, 12, 200, 18, juce::Justification::centredLeft);
+        g.setColour(juce::Colour(textPrimary));
+        g.setFont(font(19.0f, true));
+        g.drawText("Chord Code", 16, 30, 200, 26, juce::Justification::centredLeft);
+        auto versionPill = juce::Rectangle<float>((float) panelWidth - 80.0f, 30.0f, 64.0f, 24.0f);
+        g.setColour(juce::Colour(surfaceRaised));
+        g.fillRoundedRectangle(versionPill, 12.0f);
+        g.setColour(juce::Colour(textSecondary));
+        g.setFont(font(12.5f, true));
+        g.drawText("v" JucePlugin_VersionString, versionPill, juce::Justification::centred);
+        divider(g, 66);
+
+        // Tempo: sync switch, then manual BPM chips.
+        sectionLabel(g, "TEMPO", 78);
+        auto row = syncRow();
+        g.setColour(isOver(row) ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
+        g.fillRoundedRectangle(row, 9.0f);
+        g.setColour(juce::Colour(textPrimary));
+        g.setFont(font(14.5f, true));
+        g.drawText(utf("Sincronizar BPM"), row.withTrimmedLeft(12.0f).toNearestInt(), juce::Justification::centredLeft);
+        auto track = juce::Rectangle<float>(40.0f, 22.0f).withCentre({ row.getRight() - 32.0f, row.getCentreY() });
+        if (synced) { g.setGradientFill(accentGradient(track)); } else { g.setColour(juce::Colour(0xff2a2f37)); }
+        g.fillRoundedRectangle(track, 11.0f);
+        g.setColour(juce::Colour(textPrimary));
+        g.fillEllipse(juce::Rectangle<float>(16.0f, 16.0f).withCentre({ synced ? track.getRight() - 11.0f : track.getX() + 11.0f, track.getCentreY() }));
+        if (synced) {
+            g.setColour(juce::Colour(textSecondary));
+            g.setFont(font(12.5f));
+            g.drawText(utf("projeto: ") + juce::String(model.hostBpm()) + " BPM", row.withTrimmedRight(62.0f).toNearestInt(),
+                       juce::Justification::centredRight);
+        }
+
+        for (size_t i = 0; i < bpmValues.size(); ++i) {
+            const auto chip = bpmAreas[i];
+            const bool active = !synced && manual == bpmValues[i];
+            const bool over = isOver(chip);
+            if (active) { g.setGradientFill(accentGradient(chip)); g.fillRoundedRectangle(chip, 8.0f); }
+            else {
+                g.setColour(over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
+                g.fillRoundedRectangle(chip, 8.0f);
+                g.setColour(over ? juce::Colour(orange).withAlpha(0.7f) : juce::Colour(border));
+                g.drawRoundedRectangle(chip.reduced(0.5f), 8.0f, 1.0f);
+            }
+            g.setColour(active ? juce::Colour(0xff160904) : synced ? juce::Colour(textSecondary) : juce::Colour(textPrimary));
+            g.setFont(font(14.5f, true));
+            g.drawText(juce::String(bpmValues[i]), chip, juce::Justification::centred);
+        }
+        g.setColour(juce::Colour(textQuiet));
+        g.setFont(font(12.0f));
+        g.drawText(utf("Escolher um BPM desliga a sincronização"), 16, 226, panelWidth - 32, 18, juce::Justification::centredLeft);
+        divider(g, 254);
+
+        sectionLabel(g, utf("ATUALIZAÇÕES"), 266);
+        auto button = updateButton();
+        const bool over = isOver(button) && !model.checking;
+        g.setColour(over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
+        g.fillRoundedRectangle(button, 9.0f);
+        g.setColour(over ? juce::Colour(orange).withAlpha(0.7f) : juce::Colour(border));
+        g.drawRoundedRectangle(button.reduced(0.5f), 9.0f, 1.0f);
+        drawHistoryIcon(g, juce::Rectangle<float>(20.0f, 20.0f).withCentre({ button.getX() + 22.0f, button.getCentreY() }),
+                        model.checking ? juce::Colour(textQuiet) : juce::Colour(orangeLight));
+        g.setColour(model.checking ? juce::Colour(textSecondary) : juce::Colour(textPrimary));
+        g.setFont(font(14.5f, true));
+        g.drawText(model.checking ? utf("Verificando atualizações...") : utf("Verificar atualizações"),
+                   button.withTrimmedLeft(42.0f).toNearestInt(), juce::Justification::centredLeft);
+
+        g.setColour(juce::Colour(textQuiet));
+        g.setFont(labelFont(11.0f));
+        g.drawText("BY AUDIO MAKERS", 16, 340, panelWidth - 32, 18, juce::Justification::centredLeft);
+    }
+
+    void mouseMove(const juce::MouseEvent& e) override { mouse = e.position; repaint(); }
+    void mouseExit(const juce::MouseEvent&) override { mouse = { -1.0f, -1.0f }; repaint(); }
+    void mouseUp(const juce::MouseEvent& e) override {
+        if (syncRow().contains(e.position)) { model.setSynced(!model.isSynced()); repaint(); return; }
+        for (size_t i = 0; i < bpmValues.size(); ++i)
+            if (bpmAreas[i].contains(e.position)) { model.setManualBpm(bpmValues[i]); repaint(); return; }
+        if (updateButton().contains(e.position) && !model.checking) { *chosen = 1; triggerMenuItem(); }
+    }
+
+private:
+    static constexpr int panelWidth = 320;
+    static constexpr std::array<int, 8> bpmValues { 80, 90, 100, 110, 120, 128, 140, 160 };
+
+    juce::Rectangle<float> syncRow() const { return { 16.0f, 98.0f, (float) panelWidth - 32.0f, 40.0f }; }
+    juce::Rectangle<float> updateButton() const { return { 16.0f, 288.0f, (float) panelWidth - 32.0f, 40.0f }; }
+    bool isOver(juce::Rectangle<float> r) const { return r.contains(mouse); }
+    void divider(juce::Graphics& g, int y) const {
+        g.setColour(juce::Colour(borderQuiet));
+        g.fillRect(16.0f, (float) y, (float) panelWidth - 32.0f, 1.0f);
+    }
+    static void sectionLabel(juce::Graphics& g, const juce::String& text, int y) {
+        g.setColour(juce::Colour(textSecondary));
+        g.setFont(labelFont(11.5f));
+        g.drawText(text, 16, y, 200, 16, juce::Justification::centredLeft);
+    }
+
+    Model model;
+    std::shared_ptr<int> chosen;
+    std::array<juce::Rectangle<float>, 8> bpmAreas {};
+    juce::Point<float> mouse { -1.0f, -1.0f };
+};
+
 // Right-click chord picker: options grouped by scale degree, auditioned on hover.
 class ChordPickerPanel final : public juce::PopupMenu::CustomComponent {
 public:
@@ -873,36 +1006,36 @@ void ChordCodeProEditor::showChordChoices(int slot) {
 }
 
 void ChordCodeProEditor::showSettings() {
-    const bool synced = *pro.apvts.getRawParameterValue("bpmSync") > 0.5f;
-    const int currentBpm = (int) *pro.apvts.getRawParameterValue("manualBpm");
-    juce::PopupMenu bpmMenu;
-    for (int bpm : { 80, 90, 100, 110, 120, 128, 140, 160 })
-        bpmMenu.addItem(1000 + bpm, juce::String(bpm) + " BPM", true, currentBpm == bpm);
+    juce::Component::SafePointer<ChordCodeProEditor> safe(this);
+    SettingsPanel::Model model;
+    model.isSynced = [safe] { return safe != nullptr && *safe->pro.apvts.getRawParameterValue("bpmSync") > 0.5f; };
+    model.manualBpm = [safe] { return safe != nullptr ? (int) *safe->pro.apvts.getRawParameterValue("manualBpm") : 120; };
+    model.hostBpm = [safe] { return safe != nullptr ? juce::roundToInt(safe->pro.hostBpm()) : 120; };
+    model.setSynced = [safe](bool value) {
+        if (safe == nullptr) return;
+        if (auto* param = safe->pro.apvts.getParameter("bpmSync"))
+            param->setValueNotifyingHost(param->convertTo0to1(value ? 1.0f : 0.0f));
+        safe->updateStatus();
+    };
+    model.setManualBpm = [safe](int bpm) {
+        if (safe == nullptr) return;
+        if (auto* sync = safe->pro.apvts.getParameter("bpmSync")) sync->setValueNotifyingHost(0.0f);
+        if (auto* param = safe->pro.apvts.getParameter("manualBpm"))
+            param->setValueNotifyingHost(param->convertTo0to1((float) bpm));
+        safe->updateStatus();
+    };
+    model.checking = updateChecker.isChecking();
+
+    auto chosen = std::make_shared<int>(0);
     juce::PopupMenu menu;
     menu.setLookAndFeel(&laf);
-    menu.addItem(1, utf("Sincronizar BPM com o projeto"), true, synced);
-    menu.addSubMenu("BPM manual", bpmMenu);
-    menu.addSeparator();
-    menu.addItem(2, updateChecker.isChecking() ? utf("Verificando atualizações...") : utf("Verificar atualizações"),
-                 !updateChecker.isChecking());
-    menu.addItem(3, "By Audio Makers", false);
-    juce::Component::SafePointer<ChordCodeProEditor> safe(this);
+    menu.addCustomItem(1, std::make_unique<SettingsPanel>(std::move(model), chosen), nullptr, utf("Configurações"));
     menu.showMenuAsync(juce::PopupMenu::Options().withParentComponent(this)
                                                    .withTargetComponent(this)
-                                                   .withTargetScreenArea(settings.getScreenBounds())
-                                                   .withStandardItemHeight(30), [safe, synced](int result) {
-        if (safe == nullptr || result == 0) return;
-        if (result == 1) {
-            if (auto* param = safe->pro.apvts.getParameter("bpmSync"))
-                param->setValueNotifyingHost(param->convertTo0to1(synced ? 0.0f : 1.0f));
-        } else if (result >= 1040 && result <= 1240) {
-            if (auto* sync = safe->pro.apvts.getParameter("bpmSync")) sync->setValueNotifyingHost(0.0f);
-            if (auto* bpm = safe->pro.apvts.getParameter("manualBpm"))
-                bpm->setValueNotifyingHost(bpm->convertTo0to1((float) (result - 1000)));
-        } else if (result == 2) {
-            safe->checkForUpdates();
-        }
-    });
+                                                   .withTargetScreenArea(settings.getScreenBounds()),
+        [safe, chosen](int result) {
+            if (safe != nullptr && result == 1 && *chosen == 1) safe->checkForUpdates();
+        });
 }
 
 void ChordCodeProEditor::checkForUpdates() {
