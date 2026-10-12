@@ -40,12 +40,24 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Render installer preview
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force preview | Out-Null
+          Start-Process "build/Release/Windows/ChordCodeProInstaller.exe" -ArgumentList "--screenshot", "$pwd\preview" -Wait
+          Get-ChildItem preview/*.png | ForEach-Object {
+            Write-Output "PREVIEW-BEGIN $($_.Name)"
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($_.FullName))
+            Write-Output "PREVIEW-END"
+          }
+
       - name: Collect build
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist-windows | Out-Null
           Copy-Item "build/Release/Windows/ChordCodeProInstaller.exe" "dist-windows/Chord Code Setup.exe"
           Copy-Item -Recurse "build/ChordCodePro_artefacts/Release/VST3/Chord Code.vst3" "dist-windows/Chord Code.vst3"
+          Copy-Item preview/*.png dist-windows/
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v7

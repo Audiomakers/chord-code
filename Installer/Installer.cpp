@@ -1,36 +1,26 @@
 #include <windows.h>
+#include <windowsx.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <objbase.h>
+#include <dwmapi.h>
+#include <algorithm>
 #include <string>
+#include <vector>
+#include <gdiplus.h>
 
 #ifndef CCP_VERSION
 #define CCP_VERSION L"1.2.2"
 #endif
 
 namespace {
-constexpr int idVstPath = 101;
-constexpr int idVstBrowse = 102;
-constexpr int idInstall = 103;
-constexpr int idCancel = 104;
-constexpr int idOptionVst = 105;
-constexpr int idOptionApp = 106;
-constexpr int idOptionShortcut = 107;
 constexpr int payloadVst = 201;
 constexpr int payloadApp = 202;
 constexpr wchar_t uninstallKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AudioMakers.ChordCode";
 constexpr wchar_t appTitle[] = L"Chord Code";
+constexpr float windowWidth = 640.0f, windowHeight = 500.0f;
 
-HWND vstPath {}, vstBrowse {}, installButton {}, cancelButton {};
-HFONT titleFont {}, subtitleFont {}, bodyFont {}, captionFont {};
-HBRUSH backgroundBrush {}, surfaceBrush {}, editBrush {};
-HICON brandIcon {};
-float dpiScale = 1.0f;
-bool installVst = true, installApp = true, desktopShortcut = true;
-bool finished = false;
 std::wstring installedApp;
-
-int px(int value) { return static_cast<int>(value * dpiScale + 0.5f); }
 
 std::wstring lastError() {
     const auto code = GetLastError();
@@ -53,14 +43,6 @@ std::wstring knownFolder(REFKNOWNFOLDERID id) {
 std::wstring appFolder() { return knownFolder(FOLDERID_ProgramFiles) + L"\\Audio Makers\\Chord Code"; }
 std::wstring desktopLink() { return knownFolder(FOLDERID_PublicDesktop) + L"\\Chord Code.lnk"; }
 std::wstring startMenuLink() { return knownFolder(FOLDERID_CommonPrograms) + L"\\Audio Makers\\Chord Code.lnk"; }
-
-std::wstring textOf(HWND control) {
-    const int size = GetWindowTextLengthW(control) + 1;
-    std::wstring value(static_cast<size_t>(size), L'\0');
-    GetWindowTextW(control, value.data(), size);
-    value.resize(wcslen(value.c_str()));
-    return value;
-}
 
 bool ensureDirectory(const std::wstring& path, std::wstring& error) {
     const int result = SHCreateDirectoryExW(nullptr, path.c_str(), nullptr);
@@ -191,89 +173,6 @@ std::wstring browseFolder(HWND owner) {
     CoTaskMemFree(list);
     return ok ? std::wstring(path) : std::wstring();
 }
-
-HWND addControl(HWND parent, const wchar_t* type, const wchar_t* text, DWORD style,
-                int x, int y, int width, int height, int id) {
-    auto control = CreateWindowExW(0, type, text, WS_CHILD | WS_VISIBLE | style,
-                                   px(x), px(y), px(width), px(height), parent,
-                                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
-                                   GetModuleHandleW(nullptr), nullptr);
-    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(bodyFont), TRUE);
-    return control;
-}
-
-void drawText(HDC dc, const wchar_t* text, RECT bounds, HFONT font, COLORREF colour,
-              UINT format = DT_LEFT | DT_SINGLELINE | DT_VCENTER) {
-    const auto previous = SelectObject(dc, font);
-    SetTextColor(dc, colour);
-    SetBkMode(dc, TRANSPARENT);
-    DrawTextW(dc, text, -1, &bounds, format);
-    SelectObject(dc, previous);
-}
-
-void fillRound(HDC dc, RECT r, int radius, COLORREF fill, COLORREF border) {
-    auto brush = CreateSolidBrush(fill);
-    auto pen = CreatePen(PS_SOLID, px(1), border);
-    const auto oldBrush = SelectObject(dc, brush);
-    const auto oldPen = SelectObject(dc, pen);
-    RoundRect(dc, r.left, r.top, r.right, r.bottom, radius, radius);
-    SelectObject(dc, oldPen);
-    SelectObject(dc, oldBrush);
-    DeleteObject(pen);
-    DeleteObject(brush);
-}
-
-void updateControls() {
-    EnableWindow(vstPath, installVst && !finished);
-    EnableWindow(vstBrowse, installVst && !finished);
-    EnableWindow(installButton, finished || installVst || installApp);
-    SetWindowTextW(installButton, finished ? (installedApp.empty() ? L"Concluir" : L"Abrir Chord Code") : L"Instalar");
-    SetWindowTextW(cancelButton, finished ? L"Fechar" : L"Cancelar");
-}
-
-bool install(HWND window) {
-    std::wstring error;
-    std::wstring bundle;
-    if (installVst) {
-        const auto root = textOf(vstPath);
-        if (root.empty()) {
-            MessageBoxW(window, L"Escolha uma pasta para instalar o VST3.", appTitle, MB_OK | MB_ICONWARNING);
-            return false;
-        }
-        bundle = root + L"\\Chord Code.vst3";
-        for (const auto& old : { bundle, root + L"\\Chord Code Pro.vst3", root + L"\\Audio Makers\\Chord Code Pro.vst3",
-                                 root + L"\\Chord Code Pro 2.1.vst3", root + L"\\Chord Code Pro 2.1.1.vst3",
-                                 root + L"\\Chord Code Pro 1.1.0.vst3" })
-            if (!removeTreeIfPresent(old, error)) {
-                MessageBoxW(window, error.c_str(), L"Falha na atualização", MB_OK | MB_ICONERROR);
-                return false;
-            }
-        const auto folder = bundle + L"\\Contents\\x86_64-win";
-        if (!ensureDirectory(folder, error) || !writePayload(payloadVst, folder + L"\\Chord Code.vst3", error)) {
-            MessageBoxW(window, error.c_str(), L"Falha na instalação", MB_OK | MB_ICONERROR);
-            return false;
-        }
-    }
-
-    if (installApp) {
-        const auto app = appFolder() + L"\\Chord Code.exe";
-        if (!ensureDirectory(appFolder(), error) || !removeTreeIfPresent(app, error)
-            || !writePayload(payloadApp, app, error)
-            || !createShortcut(startMenuLink(), app, error)
-            || (desktopShortcut && !createShortcut(desktopLink(), app, error))) {
-            MessageBoxW(window, error.c_str(), L"Falha na instalação", MB_OK | MB_ICONERROR);
-            return false;
-        }
-        if (!desktopShortcut) DeleteFileW(desktopLink().c_str());
-        installedApp = app;
-    }
-
-    if (!registerUninstaller(bundle, error))
-        MessageBoxW(window, error.c_str(), appTitle, MB_OK | MB_ICONWARNING);
-    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-    return true;
-}
-
 int uninstall() {
     if (MessageBoxW(nullptr, L"Remover o Chord Code deste computador?", appTitle, MB_YESNO | MB_ICONQUESTION) != IDYES)
         return 0;
@@ -302,214 +201,479 @@ int uninstall() {
     return ok ? 0 : 1;
 }
 
-void drawButton(const DRAWITEMSTRUCT& item) {
-    const bool primary = item.CtlID == idInstall;
-    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
-    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
-    FillRect(item.hDC, &item.rcItem, backgroundBrush);
-    COLORREF fill = primary ? (pressed ? RGB(226, 78, 8) : RGB(255, 90, 10)) : (pressed ? RGB(42, 46, 50) : RGB(21, 24, 29));
-    if (disabled) fill = RGB(40, 34, 30);
-    const COLORREF border = primary ? fill : RGB(58, 64, 74);
-    fillRound(item.hDC, item.rcItem, px(10), fill, border);
-    wchar_t text[64] {};
-    GetWindowTextW(item.hwndItem, text, 64);
-    drawText(item.hDC, text, item.rcItem, bodyFont, primary ? RGB(22, 9, 4) : RGB(245, 246, 248),
-             DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+// ---------------------------------------------------------------------------
+// Interface: everything is painted with GDI+ in 640×500 logical units, scaled
+// to the monitor DPI, so edges stay anti-aliased and text renders correctly.
+
+using namespace Gdiplus;
+
+enum class Page { options, installing, done };
+enum class Hit { none, optionApp, optionShortcut, optionVst, changeFolder, secondary, primary };
+
+struct State {
+    Page page = Page::options;
+    bool installApp = true, desktopShortcut = true, installVst = true;
+    std::wstring vstRoot;
+    float progress = 0.0f;
+    std::wstring progressText;
+    Hit hover = Hit::none, pressed = Hit::none;
+    float dpiScale = 1.0f;
+} state;
+
+Color rgb(int r, int g, int b, int a = 255) { return Color(static_cast<BYTE>(a), static_cast<BYTE>(r), static_cast<BYTE>(g), static_cast<BYTE>(b)); }
+const Color background = rgb(9, 10, 12), surface = rgb(17, 19, 23), surfaceHover = rgb(23, 26, 31),
+            border = rgb(39, 43, 50), textPrimary = rgb(245, 246, 248), textSecondary = rgb(139, 146, 156),
+            textQuiet = rgb(85, 92, 102), orange = rgb(255, 90, 10), orangeLight = rgb(255, 140, 58),
+            amber = rgb(255, 178, 61), success = rgb(61, 220, 132);
+
+RectF rect(float x, float y, float w, float h) { return RectF(x, y, w, h); }
+
+void roundedPath(GraphicsPath& path, RectF r, float radius) {
+    const float d = (std::min)(radius * 2.0f, (std::min)(r.Width, r.Height));
+    path.AddArc(r.X, r.Y, d, d, 180, 90);
+    path.AddArc(r.X + r.Width - d, r.Y, d, d, 270, 90);
+    path.AddArc(r.X + r.Width - d, r.Y + r.Height - d, d, d, 0, 90);
+    path.AddArc(r.X, r.Y + r.Height - d, d, d, 90, 90);
+    path.CloseFigure();
 }
 
-// Option rows: an orange check square, a title and a short description.
-void drawOption(const DRAWITEMSTRUCT& item) {
-    const bool checked = item.CtlID == idOptionVst ? installVst : item.CtlID == idOptionApp ? installApp : desktopShortcut;
-    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
-    FillRect(item.hDC, &item.rcItem, backgroundBrush);
-    RECT card = item.rcItem;
-    fillRound(item.hDC, card, px(12), RGB(21, 24, 29), checked && !disabled ? RGB(150, 64, 20) : RGB(39, 43, 50));
-    RECT box { card.left + px(16), card.top + (card.bottom - card.top - px(20)) / 2, 0, 0 };
-    box.right = box.left + px(20);
-    box.bottom = box.top + px(20);
-    fillRound(item.hDC, box, px(6), checked ? RGB(255, 90, 10) : RGB(13, 15, 18), checked ? RGB(255, 90, 10) : RGB(70, 76, 86));
-    if (checked) {
-        auto pen = CreatePen(PS_SOLID, px(2), RGB(22, 9, 4));
-        const auto oldPen = SelectObject(item.hDC, pen);
-        MoveToEx(item.hDC, box.left + px(5), box.top + px(10), nullptr);
-        LineTo(item.hDC, box.left + px(9), box.top + px(14));
-        LineTo(item.hDC, box.left + px(15), box.top + px(6));
-        SelectObject(item.hDC, oldPen);
-        DeleteObject(pen);
+void fillRounded(Graphics& g, RectF r, float radius, const Brush& brush) {
+    GraphicsPath path;
+    roundedPath(path, r, radius);
+    g.FillPath(&brush, &path);
+}
+
+void strokeRounded(Graphics& g, RectF r, float radius, Color colour, float width = 1.0f) {
+    GraphicsPath path;
+    roundedPath(path, r, radius);
+    Pen pen(colour, width);
+    g.DrawPath(&pen, &path);
+}
+
+void fillAccent(Graphics& g, RectF r, float radius) {
+    LinearGradientBrush brush(PointF(r.X, r.Y + r.Height), PointF(r.X + r.Width, r.Y), orange, orangeLight);
+    fillRounded(g, r, radius, brush);
+}
+
+void text(Graphics& g, const std::wstring& value, RectF r, float size, int style, Color colour,
+          StringAlignment horizontal = StringAlignmentNear, StringAlignment vertical = StringAlignmentCenter) {
+    FontFamily family(L"Segoe UI");
+    Font font(&family, size, style, UnitPixel);
+    StringFormat format;
+    format.SetAlignment(horizontal);
+    format.SetLineAlignment(vertical);
+    format.SetTrimming(StringTrimmingEllipsisPath);
+    SolidBrush brush(colour);
+    g.DrawString(value.c_str(), -1, &font, r, &format, &brush);
+}
+
+void brandMark(Graphics& g, RectF r) {
+    fillAccent(g, r, r.Width * 10.0f / 38.0f);
+    SolidBrush bar(rgb(22, 9, 4));
+    const float u = r.Width / 38.0f;
+    const float heights[] { 10.0f, 20.0f, 14.0f, 24.0f };
+    for (int i = 0; i < 4; ++i)
+        fillRounded(g, rect(r.X + (8.0f + i * 6.5f) * u, r.Y + r.Height * 0.5f - heights[i] * 0.5f * u, 3.5f * u, heights[i] * u),
+                    1.75f * u, bar);
+}
+
+void tick(Graphics& g, PointF c, float size, Color colour, float width) {
+    Pen pen(colour, width);
+    pen.SetStartCap(LineCapRound);
+    pen.SetEndCap(LineCapRound);
+    pen.SetLineJoin(LineJoinRound);
+    PointF points[] { PointF(c.X - size * 0.5f, c.Y), PointF(c.X - size * 0.15f, c.Y + size * 0.35f), PointF(c.X + size * 0.55f, c.Y - size * 0.4f) };
+    g.DrawLines(&pen, points, 3);
+}
+
+RectF optionArea(Hit option) {
+    switch (option) {
+        case Hit::optionApp: return rect(32, 148, 576, 62);
+        case Hit::optionShortcut: return rect(32, 218, 576, 62);
+        default: return rect(32, 288, 576, 108);
     }
-    const wchar_t* title = item.CtlID == idOptionVst ? L"Plugin VST3"
-                         : item.CtlID == idOptionApp ? L"Aplicativo Chord Code" : L"Atalho na área de trabalho";
-    const wchar_t* detail = item.CtlID == idOptionVst ? L"Para FL Studio, Ableton e outras DAWs"
-                          : item.CtlID == idOptionApp ? L"Abre sozinho, sem precisar de uma DAW"
-                                                      : L"Ícone do Chord Code na sua área de trabalho";
-    const COLORREF titleColour = disabled ? RGB(85, 92, 102) : RGB(245, 246, 248);
-    drawText(item.hDC, title, { box.right + px(14), card.top + px(9), card.right - px(12), card.top + px(31) },
-             bodyFont, titleColour);
-    drawText(item.hDC, detail, { box.right + px(14), card.top + px(30), card.right - px(12), card.bottom - px(8) },
-             subtitleFont, RGB(139, 146, 156));
+}
+RectF folderField() { return rect(48, 342, 544, 38); }
+RectF changeButton() { return rect(500, 346, 86, 30); }
+RectF secondaryButton() { return rect(344, 432, 120, 44); }
+RectF primaryButton() { return rect(476, 432, 132, 44); }
+
+bool optionEnabled(Hit option) { return option != Hit::optionShortcut || state.installApp; }
+bool optionChecked(Hit option) {
+    return option == Hit::optionApp ? state.installApp : option == Hit::optionShortcut ? state.desktopShortcut : state.installVst;
+}
+
+void toggleSwitch(Graphics& g, RectF r, bool on, bool enabled) {
+    if (on && enabled) fillAccent(g, r, r.Height * 0.5f);
+    else { SolidBrush off(on ? rgb(70, 46, 34) : rgb(42, 47, 55)); fillRounded(g, r, r.Height * 0.5f, off); }
+    SolidBrush knob(enabled ? textPrimary : rgb(120, 126, 136));
+    const float k = r.Height - 6.0f;
+    g.FillEllipse(&knob, on ? r.X + r.Width - k - 3.0f : r.X + 3.0f, r.Y + 3.0f, k, k);
+}
+
+void option(Graphics& g, Hit id, const wchar_t* title, const wchar_t* detail) {
+    const auto r = optionArea(id);
+    const bool enabled = optionEnabled(id), on = optionChecked(id) && enabled;
+    SolidBrush fill(state.hover == id && enabled ? surfaceHover : surface);
+    fillRounded(g, r, 14, fill);
+    strokeRounded(g, r, 14, on ? rgb(255, 90, 10, 110) : border);
+    text(g, title, rect(r.X + 20, r.Y + 11, r.Width - 110, 22), 15.5f, FontStyleBold, enabled ? textPrimary : textQuiet);
+    text(g, detail, rect(r.X + 20, r.Y + 32, r.Width - 110, 20), 13, FontStyleRegular, enabled ? textSecondary : textQuiet);
+    toggleSwitch(g, rect(r.X + r.Width - 64, r.Y + 18, 44, 26), on, enabled);
+}
+
+void button(Graphics& g, RectF r, const std::wstring& label, bool primary, Hit id) {
+    const bool over = state.hover == id, down = state.pressed == id;
+    if (primary) {
+        fillAccent(g, r, 12);
+        if (over || down) { SolidBrush light(rgb(255, 255, 255, down ? 18 : 34)); fillRounded(g, r, 12, light); }
+        text(g, label, r, 15, FontStyleBold, rgb(22, 9, 4), StringAlignmentCenter);
+    } else {
+        SolidBrush fill(over ? surfaceHover : surface);
+        fillRounded(g, r, 12, fill);
+        strokeRounded(g, r, 12, over ? rgb(255, 90, 10, 170) : border);
+        text(g, label, r, 15, FontStyleBold, textPrimary, StringAlignmentCenter);
+    }
+}
+
+void paint(Graphics& g) {
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+    g.Clear(background);
+
+    // Warm light behind the brand.
+    {
+        GraphicsPath glow;
+        glow.AddEllipse(-160.0f, -230.0f, 620.0f, 420.0f);
+        PathGradientBrush brush(&glow);
+        brush.SetCenterColor(rgb(255, 90, 10, 46));
+        Color edge = rgb(255, 90, 10, 0);
+        int count = 1;
+        brush.SetSurroundColors(&edge, &count);
+        g.FillPath(&brush, &glow);
+    }
+
+    brandMark(g, rect(32, 30, 56, 56));
+    text(g, L"Chord Code", rect(104, 30, 360, 34), 26, FontStyleBold, textPrimary);
+    text(g, std::wstring(L"Audio Makers  ·  versão ") + CCP_VERSION, rect(105, 62, 360, 22), 13.5f, FontStyleRegular, textSecondary);
+
+    if (state.page == Page::options) {
+        text(g, L"O QUE INSTALAR", rect(32, 118, 300, 20), 11.5f, FontStyleBold, orangeLight);
+        option(g, Hit::optionApp, L"Aplicativo Chord Code", L"Abre sozinho, sem precisar de uma DAW");
+        option(g, Hit::optionShortcut, L"Atalho na área de trabalho", L"Ícone do Chord Code na sua área de trabalho");
+        option(g, Hit::optionVst, L"Plugin VST3", L"Para FL Studio, Ableton e outras DAWs");
+
+        const auto field = folderField();
+        SolidBrush fieldFill(rgb(10, 12, 15));
+        fillRounded(g, field, 10, fieldFill);
+        strokeRounded(g, field, 10, border);
+        text(g, state.vstRoot, rect(field.X + 14, field.Y, field.Width - 120, field.Height), 13.5f, FontStyleRegular,
+             state.installVst ? textPrimary : textQuiet);
+        const auto change = changeButton();
+        SolidBrush changeFill(state.hover == Hit::changeFolder && state.installVst ? rgb(36, 40, 47) : rgb(26, 29, 35));
+        fillRounded(g, change, 8, changeFill);
+        text(g, L"Alterar", change, 13, FontStyleBold, state.installVst ? textPrimary : textQuiet, StringAlignmentCenter);
+
+        SolidBrush line(rgb(28, 31, 36));
+        g.FillRectangle(&line, 32.0f, 414.0f, 576.0f, 1.0f);
+        text(g, L"Feche o Chord Code e a DAW\nantes de instalar.", rect(32, 432, 300, 44), 13, FontStyleRegular, textSecondary);
+        button(g, secondaryButton(), L"Cancelar", false, Hit::secondary);
+        button(g, primaryButton(), L"Instalar", true, Hit::primary);
+        return;
+    }
+
+    if (state.page == Page::installing) {
+        text(g, L"INSTALANDO", rect(32, 196, 576, 20), 11.5f, FontStyleBold, orangeLight, StringAlignmentCenter);
+        text(g, state.progressText, rect(32, 218, 576, 30), 17, FontStyleBold, textPrimary, StringAlignmentCenter);
+        const auto track = rect(120, 268, 400, 8);
+        SolidBrush trackFill(rgb(30, 33, 39));
+        fillRounded(g, track, 4, trackFill);
+        if (state.progress > 0.0f) fillAccent(g, rect(track.X, track.Y, (std::max)(8.0f, track.Width * state.progress), track.Height), 4);
+        return;
+    }
+
+    // Done.
+    SolidBrush halo(rgb(61, 220, 132, 30));
+    g.FillEllipse(&halo, 288.0f, 116.0f, 64.0f, 64.0f);
+    tick(g, PointF(320, 150), 24, success, 3.5f);
+    text(g, L"Tudo pronto!", rect(32, 192, 576, 34), 24, FontStyleBold, textPrimary, StringAlignmentCenter);
+    text(g, std::wstring(L"O Chord Code ") + CCP_VERSION + L" foi instalado.", rect(32, 226, 576, 24), 14, FontStyleRegular,
+         textSecondary, StringAlignmentCenter);
+
+    std::vector<std::pair<std::wstring, std::wstring>> items;
+    if (!installedApp.empty())
+        items.push_back({ L"Aplicativo", state.desktopShortcut ? L"No Menu Iniciar e na área de trabalho" : L"No Menu Iniciar" });
+    if (state.installVst) items.push_back({ L"Plugin VST3", L"Faça uma nova busca de plugins na sua DAW" });
+    float y = 272;
+    for (const auto& [title, detail] : items) {
+        const auto row = rect(120, y, 400, 54);
+        SolidBrush rowFill(surface);
+        fillRounded(g, row, 12, rowFill);
+        strokeRounded(g, row, 12, border);
+        tick(g, PointF(row.X + 26, row.Y + 27), 12, success, 2.4f);
+        text(g, title, rect(row.X + 48, row.Y + 8, row.Width - 60, 20), 14.5f, FontStyleBold, textPrimary);
+        text(g, detail, rect(row.X + 48, row.Y + 27, row.Width - 60, 18), 12.5f, FontStyleRegular, textSecondary);
+        y += 62;
+    }
+    button(g, secondaryButton(), L"Fechar", false, Hit::secondary);
+    button(g, primaryButton(), installedApp.empty() ? L"Concluir" : L"Abrir Chord Code", true, Hit::primary);
+}
+
+Hit hitTest(float x, float y) {
+    const auto inside = [x, y](RectF r) { return r.Contains(x, y) != FALSE; };
+    if (state.page == Page::installing) return Hit::none;
+    if (inside(primaryButton())) return Hit::primary;
+    if (inside(secondaryButton())) return Hit::secondary;
+    if (state.page != Page::options) return Hit::none;
+    if (inside(changeButton())) return Hit::changeFolder;
+    for (auto id : { Hit::optionApp, Hit::optionShortcut, Hit::optionVst })
+        if (inside(optionArea(id))) return id;
+    return Hit::none;
+}
+
+void repaintNow(HWND window) {
+    InvalidateRect(window, nullptr, FALSE);
+    UpdateWindow(window);
+}
+
+void setProgress(HWND window, float value, const wchar_t* label) {
+    state.progress = value;
+    state.progressText = label;
+    repaintNow(window);
+}
+
+bool install(HWND window) {
+    std::wstring error, bundle;
+    state.page = Page::installing;
+    setProgress(window, 0.05f, L"Preparando...");
+
+    if (state.installVst) {
+        setProgress(window, 0.2f, L"Instalando o plugin VST3...");
+        const auto& root = state.vstRoot;
+        bundle = root + L"\\Chord Code.vst3";
+        for (const auto& old : { bundle, root + L"\\Chord Code Pro.vst3", root + L"\\Audio Makers\\Chord Code Pro.vst3",
+                                 root + L"\\Chord Code Pro 2.1.vst3", root + L"\\Chord Code Pro 2.1.1.vst3",
+                                 root + L"\\Chord Code Pro 1.1.0.vst3" })
+            if (!removeTreeIfPresent(old, error)) break;
+        const auto folder = bundle + L"\\Contents\\x86_64-win";
+        if (error.empty() && ensureDirectory(folder, error)) writePayload(payloadVst, folder + L"\\Chord Code.vst3", error);
+    }
+
+    if (error.empty() && state.installApp) {
+        setProgress(window, 0.55f, L"Instalando o aplicativo...");
+        const auto app = appFolder() + L"\\Chord Code.exe";
+        if (ensureDirectory(appFolder(), error) && removeTreeIfPresent(app, error) && writePayload(payloadApp, app, error)) {
+            setProgress(window, 0.8f, L"Criando atalhos...");
+            if (createShortcut(startMenuLink(), app, error)
+                && (!state.desktopShortcut || createShortcut(desktopLink(), app, error))) {
+                if (!state.desktopShortcut) DeleteFileW(desktopLink().c_str());
+                installedApp = app;
+            }
+        }
+    }
+
+    if (!error.empty()) {
+        MessageBoxW(window, error.c_str(), L"Falha na instalação", MB_OK | MB_ICONERROR);
+        state.page = Page::options;
+        repaintNow(window);
+        return false;
+    }
+
+    setProgress(window, 0.95f, L"Finalizando...");
+    if (!registerUninstaller(bundle, error)) MessageBoxW(window, error.c_str(), appTitle, MB_OK | MB_ICONWARNING);
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+    state.page = Page::done;
+    repaintNow(window);
+    return true;
+}
+
+void activate(HWND window, Hit id) {
+    if (id == Hit::secondary) { DestroyWindow(window); return; }
+    if (state.page == Page::done && id == Hit::primary) {
+        if (!installedApp.empty()) ShellExecuteW(nullptr, L"open", installedApp.c_str(), nullptr, appFolder().c_str(), SW_SHOWNORMAL);
+        DestroyWindow(window);
+        return;
+    }
+    if (state.page != Page::options) return;
+    if (id == Hit::primary) {
+        if (!state.installApp && !state.installVst) {
+            MessageBoxW(window, L"Escolha o aplicativo, o plugin VST3 ou os dois.", appTitle, MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        install(window);
+    } else if (id == Hit::changeFolder && state.installVst) {
+        const auto selected = browseFolder(window);
+        if (!selected.empty()) state.vstRoot = selected;
+    } else if (id == Hit::optionApp) {
+        state.installApp = !state.installApp;
+    } else if (id == Hit::optionShortcut && state.installApp) {
+        state.desktopShortcut = !state.desktopShortcut;
+    } else if (id == Hit::optionVst) {
+        state.installVst = !state.installVst;
+    }
+    InvalidateRect(window, nullptr, FALSE);
+}
+
+void applyDarkTitleBar(HWND window) {
+    const BOOL dark = TRUE;
+    DwmSetWindowAttribute(window, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof(dark));
+    const COLORREF caption = RGB(9, 10, 12);
+    DwmSetWindowAttribute(window, 35 /* DWMWA_CAPTION_COLOR */, &caption, sizeof(caption));
 }
 
 LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-    if (message == WM_CREATE) {
-        backgroundBrush = CreateSolidBrush(RGB(9, 10, 12));
-        surfaceBrush = CreateSolidBrush(RGB(15, 17, 21));
-        editBrush = CreateSolidBrush(RGB(13, 15, 18));
-        const auto makeFont = [](int height, int weight) {
-            return CreateFontW(px(height), 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                               CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-        };
-        titleFont = makeFont(30, FW_BOLD);
-        subtitleFont = makeFont(14, FW_NORMAL);
-        bodyFont = makeFont(16, FW_SEMIBOLD);
-        captionFont = makeFont(12, FW_BOLD);
-        brandIcon = reinterpret_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1),
-                                                        IMAGE_ICON, px(64), px(64), LR_DEFAULTCOLOR));
-
-        addControl(window, L"BUTTON", L"", BS_OWNERDRAW, 32, 156, 606, 56, idOptionApp);
-        addControl(window, L"BUTTON", L"", BS_OWNERDRAW, 32, 220, 606, 56, idOptionShortcut);
-        addControl(window, L"BUTTON", L"", BS_OWNERDRAW, 32, 284, 606, 56, idOptionVst);
-        vstPath = addControl(window, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 32, 374, 468, 38, idVstPath);
-        vstBrowse = addControl(window, L"BUTTON", L"Selecionar", BS_OWNERDRAW, 512, 374, 126, 38, idVstBrowse);
-        cancelButton = addControl(window, L"BUTTON", L"Cancelar", BS_OWNERDRAW, 344, 456, 136, 44, idCancel);
-        installButton = addControl(window, L"BUTTON", L"Instalar", BS_OWNERDRAW | BS_DEFPUSHBUTTON, 490, 456, 148, 44, idInstall);
-
-        SetWindowTextW(vstPath, (knownFolder(FOLDERID_ProgramFilesCommon) + L"\\VST3").c_str());
-        SendMessageW(vstPath, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(px(11), px(11)));
-        updateControls();
-        return 0;
-    }
-
-    if (message == WM_COMMAND) {
-        const int id = LOWORD(wParam);
-        if (id == idInstall) {
-            if (finished) {
-                if (!installedApp.empty()) ShellExecuteW(nullptr, L"open", installedApp.c_str(), nullptr, appFolder().c_str(), SW_SHOWNORMAL);
-                DestroyWindow(window);
-            } else if (install(window)) {
-                finished = true;
-                for (int option : { idOptionVst, idOptionApp, idOptionShortcut }) EnableWindow(GetDlgItem(window, option), FALSE);
-                updateControls();
-                InvalidateRect(window, nullptr, TRUE);
+    switch (message) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps {};
+            auto dc = BeginPaint(window, &ps);
+            RECT client {};
+            GetClientRect(window, &client);
+            // Double-buffered so hover changes never flicker.
+            Bitmap buffer(client.right, client.bottom, PixelFormat32bppARGB);
+            {
+                Graphics g(&buffer);
+                g.ScaleTransform(state.dpiScale, state.dpiScale);
+                paint(g);
             }
-        } else if (id == idCancel) DestroyWindow(window);
-        else if (id == idVstBrowse) {
-            const auto selected = browseFolder(window);
-            if (!selected.empty()) SetWindowTextW(vstPath, selected.c_str());
-        } else if (!finished && (id == idOptionVst || id == idOptionApp || id == idOptionShortcut)) {
-            if (id == idOptionVst) installVst = !installVst;
-            if (id == idOptionApp) { installApp = !installApp; EnableWindow(GetDlgItem(window, idOptionShortcut), installApp); }
-            if (id == idOptionShortcut) desktopShortcut = !desktopShortcut;
-            if (!installApp) desktopShortcut = false;
-            InvalidateRect(GetDlgItem(window, idOptionShortcut), nullptr, TRUE);
-            InvalidateRect(GetDlgItem(window, id), nullptr, TRUE);
-            updateControls();
+            Graphics screen(dc);
+            screen.DrawImage(&buffer, 0, 0);
+            EndPaint(window, &ps);
+            return 0;
         }
-        return 0;
-    }
-
-    if (message == WM_DRAWITEM) {
-        const auto& item = *reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
-        if (item.CtlID == idOptionVst || item.CtlID == idOptionApp || item.CtlID == idOptionShortcut) drawOption(item);
-        else drawButton(item);
-        return TRUE;
-    }
-
-    if (message == WM_PAINT) {
-        PAINTSTRUCT ps {};
-        auto dc = BeginPaint(window, &ps);
-        RECT client {};
-        GetClientRect(window, &client);
-        FillRect(dc, &client, backgroundBrush);
-
-        RECT header { 0, 0, client.right, px(124) };
-        FillRect(dc, &header, surfaceBrush);
-        RECT accent { 0, 0, client.right, px(3) };
-        auto orange = CreateSolidBrush(RGB(255, 90, 10));
-        FillRect(dc, &accent, orange);
-        DeleteObject(orange);
-
-        if (brandIcon) DrawIconEx(dc, px(32), px(30), brandIcon, px(64), px(64), 0, nullptr, DI_NORMAL);
-        drawText(dc, L"CHORD CODE", { px(114), px(30), px(620), px(66) }, titleFont, RGB(245, 246, 248));
-        const std::wstring subtitle = std::wstring(L"Audio Makers  •  Versão ") + CCP_VERSION;
-        drawText(dc, subtitle.c_str(), { px(115), px(68), px(620), px(92) }, subtitleFont, RGB(139, 146, 156));
-
-        drawText(dc, finished ? L"INSTALAÇÃO CONCLUÍDA" : L"O QUE INSTALAR", { px(32), px(132), px(638), px(152) },
-                 captionFont, RGB(255, 140, 58));
-        drawText(dc, L"Pasta do VST3", { px(32), px(350), px(638), px(370) }, subtitleFont, RGB(139, 146, 156));
-
-        const wchar_t* note = finished
-            ? (installedApp.empty() ? L"Faça uma nova busca de plugins VST3 na sua DAW."
-                                    : L"O Chord Code está no Menu Iniciar e na área de trabalho.")
-            : L"Feche o Chord Code e a DAW antes de instalar ou atualizar.";
-        drawText(dc, note, { px(32), px(418), px(638), px(442) }, subtitleFont,
-                 finished ? RGB(61, 220, 132) : RGB(139, 146, 156));
-        EndPaint(window, &ps);
-        return 0;
-    }
-
-    if (message == WM_CTLCOLOREDIT || message == WM_CTLCOLORSTATIC) {
-        SetTextColor(reinterpret_cast<HDC>(wParam), RGB(239, 240, 238));
-        SetBkColor(reinterpret_cast<HDC>(wParam), RGB(13, 15, 18));
-        return reinterpret_cast<LRESULT>(editBrush);
-    }
-
-    if (message == WM_DESTROY) {
-        if (brandIcon) DestroyIcon(brandIcon);
-        for (auto object : { reinterpret_cast<HGDIOBJ>(titleFont), reinterpret_cast<HGDIOBJ>(subtitleFont),
-                             reinterpret_cast<HGDIOBJ>(bodyFont), reinterpret_cast<HGDIOBJ>(captionFont),
-                             reinterpret_cast<HGDIOBJ>(backgroundBrush), reinterpret_cast<HGDIOBJ>(surfaceBrush),
-                             reinterpret_cast<HGDIOBJ>(editBrush) })
-            if (object) DeleteObject(object);
-        PostQuitMessage(0);
-        return 0;
+        case WM_ERASEBKGND: return 1;
+        case WM_MOUSEMOVE: {
+            const auto hit = hitTest(GET_X_LPARAM(lParam) / state.dpiScale, GET_Y_LPARAM(lParam) / state.dpiScale);
+            if (hit != state.hover) {
+                state.hover = hit;
+                SetCursor(LoadCursorW(nullptr, hit == Hit::none ? IDC_ARROW : IDC_HAND));
+                InvalidateRect(window, nullptr, FALSE);
+            }
+            TRACKMOUSEEVENT track { sizeof(track), TME_LEAVE, window, 0 };
+            TrackMouseEvent(&track);
+            return 0;
+        }
+        case WM_SETCURSOR:
+            if (LOWORD(lParam) == HTCLIENT) { SetCursor(LoadCursorW(nullptr, state.hover == Hit::none ? IDC_ARROW : IDC_HAND)); return TRUE; }
+            break;
+        case WM_MOUSELEAVE:
+            state.hover = Hit::none;
+            InvalidateRect(window, nullptr, FALSE);
+            return 0;
+        case WM_LBUTTONDOWN:
+            state.pressed = hitTest(GET_X_LPARAM(lParam) / state.dpiScale, GET_Y_LPARAM(lParam) / state.dpiScale);
+            SetCapture(window);
+            InvalidateRect(window, nullptr, FALSE);
+            return 0;
+        case WM_LBUTTONUP: {
+            ReleaseCapture();
+            const auto hit = hitTest(GET_X_LPARAM(lParam) / state.dpiScale, GET_Y_LPARAM(lParam) / state.dpiScale);
+            const auto pressed = state.pressed;
+            state.pressed = Hit::none;
+            InvalidateRect(window, nullptr, FALSE);
+            if (hit != Hit::none && hit == pressed) activate(window, hit);
+            return 0;
+        }
+        case WM_KEYDOWN:
+            if (wParam == VK_RETURN) activate(window, Hit::primary);
+            else if (wParam == VK_ESCAPE && state.page != Page::installing) DestroyWindow(window);
+            return 0;
+        case WM_DPICHANGED: {
+            state.dpiScale = HIWORD(wParam) / 96.0f;
+            const auto* suggested = reinterpret_cast<RECT*>(lParam);
+            SetWindowPos(window, nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
+                         suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
+            InvalidateRect(window, nullptr, FALSE);
+            return 0;
+        }
+        case WM_CLOSE:
+            if (state.page == Page::installing) return 0;
+            break;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        default: break;
     }
     return DefWindowProcW(window, message, wParam, lParam);
 }
+
+// `--screenshot <folder>` renders each page to PNG for build previews.
+int saveScreenshots(const std::wstring& folder) {
+    CLSID png {};
+    UINT count = 0, size = 0;
+    GetImageEncodersSize(&count, &size);
+    std::vector<BYTE> storage(size);
+    auto* encoders = reinterpret_cast<ImageCodecInfo*>(storage.data());
+    GetImageEncoders(count, size, encoders);
+    for (UINT i = 0; i < count; ++i)
+        if (wcscmp(encoders[i].MimeType, L"image/png") == 0) png = encoders[i].Clsid;
+    state.vstRoot = L"C:\\Program Files\\Common Files\\VST3";
+    const auto render = [&](const wchar_t* name) {
+        Bitmap image(static_cast<INT>(windowWidth), static_cast<INT>(windowHeight), PixelFormat32bppARGB);
+        { Graphics g(&image); paint(g); }
+        image.Save((folder + L"\\" + name).c_str(), &png, nullptr);
+    };
+    render(L"installer-options.png");
+    state.page = Page::installing;
+    state.progress = 0.55f;
+    state.progressText = L"Instalando o aplicativo...";
+    render(L"installer-progress.png");
+    state.page = Page::done;
+    installedApp = L"C:\\Program Files\\Audio Makers\\Chord Code\\Chord Code.exe";
+    render(L"installer-done.png");
+    return 0;
+}
 }
 
-int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    if (wcsstr(GetCommandLineW(), L"--uninstall") != nullptr) {
-        const int result = uninstall();
-        CoUninitialize();
-        return result;
-    }
+    Gdiplus::GdiplusStartupInput gdiplusInput;
+    ULONG_PTR gdiplusToken {};
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusInput, nullptr);
 
-    auto dc = GetDC(nullptr);
-    dpiScale = static_cast<float>(GetDeviceCaps(dc, LOGPIXELSX)) / 96.0f;
-    ReleaseDC(nullptr, dc);
-    if (dpiScale < 1.0f) dpiScale = 1.0f;
+    int argc = 0;
+    auto** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    int result = 0;
+    if (argc > 1 && wcscmp(argv[1], L"--uninstall") == 0) result = uninstall();
+    else if (argc > 2 && wcscmp(argv[1], L"--screenshot") == 0) result = saveScreenshots(argv[2]);
+    else {
+        state.vstRoot = knownFolder(FOLDERID_ProgramFilesCommon) + L"\\VST3";
+        auto dc = GetDC(nullptr);
+        state.dpiScale = (std::max)(1.0f, static_cast<float>(GetDeviceCaps(dc, LOGPIXELSX)) / 96.0f);
+        ReleaseDC(nullptr, dc);
 
-    WNDCLASSEXW wc { sizeof(WNDCLASSEXW) };
-    wc.lpfnWndProc = windowProc;
-    wc.hInstance = instance;
-    wc.lpszClassName = L"ChordCodeInstaller";
-    wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
-    wc.hbrBackground = CreateSolidBrush(RGB(9, 10, 12));
-    wc.hIcon = reinterpret_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE));
-    wc.hIconSm = reinterpret_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
-    RegisterClassExW(&wc);
+        WNDCLASSEXW wc { sizeof(WNDCLASSEXW) };
+        wc.lpfnWndProc = windowProc;
+        wc.hInstance = instance;
+        wc.lpszClassName = L"ChordCodeInstaller";
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hIcon = reinterpret_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE));
+        wc.hIconSm = reinterpret_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
+        RegisterClassExW(&wc);
 
-    RECT bounds { 0, 0, px(670), px(530) };
-    AdjustWindowRectEx(&bounds, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, WS_EX_APPWINDOW);
-    const int width = bounds.right - bounds.left;
-    const int height = bounds.bottom - bounds.top;
-    const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
-    const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
-    auto window = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName, L"Instalar Chord Code",
-                                  WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                                  x, y, width, height, nullptr, nullptr, instance, nullptr);
-    if (!window) return 1;
-    ShowWindow(window, show);
-    UpdateWindow(window);
-
-    MSG message {};
-    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-        if (!IsDialogMessageW(window, &message)) {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+        const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        RECT bounds { 0, 0, static_cast<LONG>(windowWidth * state.dpiScale), static_cast<LONG>(windowHeight * state.dpiScale) };
+        AdjustWindowRectEx(&bounds, style, FALSE, WS_EX_APPWINDOW);
+        const int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+        auto window = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName, L"Instalar Chord Code", style,
+                                      (GetSystemMetrics(SM_CXSCREEN) - width) / 2, (GetSystemMetrics(SM_CYSCREEN) - height) / 2,
+                                      width, height, nullptr, nullptr, instance, nullptr);
+        if (window) {
+            applyDarkTitleBar(window);
+            ShowWindow(window, show);
+            UpdateWindow(window);
+            MSG message {};
+            while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            result = static_cast<int>(message.wParam);
+        } else {
+            result = 1;
         }
     }
+    LocalFree(argv);
+    Gdiplus::GdiplusShutdown(gdiplusToken);
     CoUninitialize();
-    return static_cast<int>(message.wParam);
+    return result;
 }

@@ -99,7 +99,11 @@ if(TARGET juce::juce_audio_utils)
    "#define RT_MANIFEST 24\n1 RT_MANIFEST \"${CCP_INSTALLER_MANIFEST}\"\n1 ICON \"${CCP_INSTALLER_ICON}\"\n201 RCDATA \"${CCP_INSTALLER_PLUGIN}\"\n202 RCDATA \"${CCP_INSTALLER_APP}\"\n")
   add_executable(ChordCodeProInstaller WIN32 Installer/Installer.cpp "${CCP_INSTALLER_DIR}/Installer.rc")
   target_compile_definitions(ChordCodeProInstaller PRIVATE UNICODE _UNICODE "CCP_VERSION=L\"${PROJECT_VERSION}\"")
-  target_link_libraries(ChordCodeProInstaller PRIVATE shell32 ole32 uuid user32 gdi32 advapi32)
+  target_link_libraries(ChordCodeProInstaller PRIVATE shell32 ole32 uuid user32 gdi32 gdiplus dwmapi advapi32)
+  if(MSVC)
+   # The interface text is Portuguese; read the source as UTF-8.
+   target_compile_options(ChordCodeProInstaller PRIVATE /utf-8)
+  endif()
   add_dependencies(ChordCodeProInstaller ChordCodePro_VST3 ChordCodePro_Standalone)
   set_target_properties(ChordCodeProInstaller PROPERTIES
    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/Release/Windows"
