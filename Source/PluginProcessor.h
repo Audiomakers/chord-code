@@ -39,6 +39,7 @@ public:
     void setChordCount(int);
     void regenerateChord(int);
     std::vector<ccp::Chord> chordChoices(int position) const;
+    std::vector<ccp::Chord> allChordChoices(int position) const;
     void chooseChord(int position, const ccp::Chord& chord);
     void auditionChord(int position, const ccp::Chord& chord);
     void setKey(int);
@@ -83,7 +84,7 @@ private:
     double sr { 44100.0 };
     float outputGain { 0.68f };
     std::atomic<int> command { 0 }, active { -1 };
-    std::atomic<int> previewDegree { 0 }, previewKind { 0 };
+    std::atomic<int> previewDegree { 0 }, previewKind { 0 }, previewRoot { 0 }, previewQuality { -1 };
     ccp::Chord customPreviewChord;
     bool customAudition {};
     int64_t playheadSamples {};

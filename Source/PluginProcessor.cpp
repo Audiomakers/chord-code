@@ -22,7 +22,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordCodeProProcessor::layou
     p.push_back(std::make_unique<juce::AudioParameterChoice>("mood", "Vibe", names<ccp::Mood>(ccp::moodName), (int) ccp::Mood::standard));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("complexity", "Complexidade", names<ccp::Complexity>(ccp::complexityName), (int) ccp::Complexity::automatic));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("tension", "Tensão", names<ccp::Tension>(ccp::tensionName), (int) ccp::Tension::standard));
-    p.push_back(std::make_unique<juce::AudioParameterChoice>("timbre", "Timbre", names<ccp::Timbre>(ccp::timbreName), (int) ccp::Timbre::electricPiano));
+    p.push_back(std::make_unique<juce::AudioParameterChoice>("timbre", "Timbre", names<ccp::Timbre>(ccp::timbreName), (int) ccp::Timbre::piano));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("voicing", "Voicing", names<ccp::Voicing>(ccp::voicingName), (int) ccp::Voicing::standard));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("rhythm", "Ritmo MIDI", juce::StringArray { "RETO", "HUMANIZE", "STRUM", "ARPEJO" }, 0));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("length", "Comprimento", juce::StringArray { "1 TEMPO", "2 TEMPOS", "4 TEMPOS" }, 1));
@@ -191,6 +191,18 @@ std::vector<ccp::Chord> ChordCodeProProcessor::chordChoices(int position) const 
     return choices;
 }
 
+std::vector<ccp::Chord> ChordCodeProProcessor::allChordChoices(int position) const {
+    const auto progression = getProgression();
+    if (position < 0 || position >= progression.chordCount)
+        return {};
+    const ccp::Chord* previous = position > 0 ? &progression.chords[(size_t) (position - 1)] : nullptr;
+    std::vector<ccp::Chord> choices;
+    for (int root = 0; root < 12; ++root)
+        for (int quality = 0; quality < ccp::chromaticQualityCount; ++quality)
+            choices.push_back(ccp::HarmonyEngine::buildChromaticChord(progression.settings, root, quality, previous, position));
+    return choices;
+}
+
 void ChordCodeProProcessor::chooseChord(int position, const ccp::Chord& selected) {
     const auto current = getProgression();
     if (position < 0 || position >= current.chordCount)
@@ -198,12 +210,10 @@ void ChordCodeProProcessor::chooseChord(int position, const ccp::Chord& selected
 
     auto updated = current;
     const ccp::Chord* previous = position > 0 ? &updated.chords[(size_t) (position - 1)] : nullptr;
-    updated.chords[(size_t) position] = ccp::HarmonyEngine::buildChord(
-        updated.settings, selected.degree, selected.kind, previous, position);
+    updated.chords[(size_t) position] = ccp::HarmonyEngine::rebuild(updated.settings, selected, previous, position);
     for (int i = position + 1; i < updated.chordCount; ++i)
-        updated.chords[(size_t) i] = ccp::HarmonyEngine::buildChord(
-            updated.settings, updated.chords[(size_t) i].degree, updated.chords[(size_t) i].kind,
-            &updated.chords[(size_t) (i - 1)], i);
+        updated.chords[(size_t) i] = ccp::HarmonyEngine::rebuild(
+            updated.settings, updated.chords[(size_t) i], &updated.chords[(size_t) (i - 1)], i);
     ++updated.identity;
     publish(updated);
 }
@@ -213,6 +223,8 @@ void ChordCodeProProcessor::auditionChord(int position, const ccp::Chord& chord)
         return;
     previewDegree.store(chord.degree, std::memory_order_relaxed);
     previewKind.store((int) chord.kind, std::memory_order_relaxed);
+    previewRoot.store(chord.root, std::memory_order_relaxed);
+    previewQuality.store(chord.quality, std::memory_order_relaxed);
     command.store(20 + position, std::memory_order_release);
 }
 
@@ -354,9 +366,12 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
         releaseSamples = 0;
         playing = juce::jlimit(0, juce::jmax(0, p.chordCount - 1), cmd - 20);
         const auto* previous = playing > 0 ? &p.chords[(size_t) (playing - 1)] : nullptr;
-        customPreviewChord = ccp::HarmonyEngine::buildChord(
-            p.settings, previewDegree.load(std::memory_order_relaxed),
-            (ccp::ChordKind) previewKind.load(std::memory_order_relaxed), previous, playing);
+        ccp::Chord requested;
+        requested.degree = previewDegree.load(std::memory_order_relaxed);
+        requested.kind = (ccp::ChordKind) previewKind.load(std::memory_order_relaxed);
+        requested.root = previewRoot.load(std::memory_order_relaxed);
+        requested.quality = previewQuality.load(std::memory_order_relaxed);
+        customPreviewChord = ccp::HarmonyEngine::rebuild(p.settings, requested, previous, playing);
         customAudition = true;
         playheadSamples = 0;
         active.store(playing);
@@ -433,7 +448,7 @@ void ChordCodeProProcessor::persistProgression() {
           << juce::String(c.name) << ",";
         for (int n = 0; n < c.noteCount; ++n)
             s << c.notes[(size_t) n] << (n + 1 < c.noteCount ? "." : "");
-        s << ";";
+        s << "," << c.quality << ";";
     }
     apvts.state.setProperty("progressionV2", s, nullptr);
     juce::String lockText;
@@ -512,6 +527,7 @@ bool ChordCodeProProcessor::restoreProgression() {
         const auto notes = juce::StringArray::fromTokens(fields[6], ".", "");
         if (notes.size() != c.noteCount) return false;
         for (int n = 0; n < c.noteCount; ++n) c.notes[(size_t) n] = notes[n].getIntValue();
+        c.quality = fields.size() >= 8 ? juce::jlimit(-1, ccp::chromaticQualityCount - 1, fields[7].getIntValue()) : -1;
     }
     if (!ccp::HarmonyEngine::valid(p))
         return false;

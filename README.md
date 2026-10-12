@@ -1,13 +1,14 @@
-# Chord Code 1.2.1
+# Chord Code 1.2.2
 
 Plugin de harmonia da Audio Makers desenvolvido em C++20 e JUCE 8.
 
 ## Formatos
 
-- Windows x64: VST3 e Standalone;
+- Windows x64: VST3 e aplicativo (instalado com atalho na área de trabalho);
 - macOS 10.15 ou superior: VST3 e Audio Unit universais (Intel e Apple Silicon);
 - macOS universal: Apple Silicon (`arm64`) e Intel (`x86_64`);
-- o instalador Windows instala o VST3 em `Common Files/VST3`;
+- o instalador Windows instala o VST3 em `Common Files/VST3` e o aplicativo em
+  `Program Files/Audio Makers/Chord Code`, com atalhos e desinstalador;
 - o pacote macOS instala VST3 e AU em `/Library/Audio/Plug-Ins`.
 
 ## Recursos principais
@@ -19,7 +20,23 @@ Plugin de harmonia da Audio Makers desenvolvido em C++20 e JUCE 8.
 - exportação e arraste de MIDI;
 - sincronização com o BPM do host;
 - preview interno com síntese e samples incorporados;
-- histórico e memória antirrepetição.
+- histórico e memória antirrepetição;
+- licença pelo e-mail da compra, verificada na primeira abertura.
+
+## Licença
+
+Na primeira vez que abre, o Chord Code pede o e-mail da compra e consulta
+`POST https://download.chordcode.audiomakers.club/api/license/check`.
+O e-mail aprovado fica salvo na pasta de dados do usuário
+(`Audio Makers/Chord Code`) e vale para o VST3, o AU e o aplicativo.
+Depois disso ele funciona offline e reconfere o acesso sempre que há internet;
+só uma resposta `authorized: false` do servidor bloqueia o uso, nunca uma
+falha de conexão.
+
+## Créditos
+
+O timbre Piano usa samples do Salamander Grand Piano, de Alexander Holm,
+licenciados sob CC BY 3.0.
 
 ## Compilação e testes
 
@@ -55,7 +72,7 @@ O build gera:
 
 - `Chord Code.vst3`;
 - `Chord Code.component`;
-- `Chord Code 1.2.1 macOS.pkg`.
+- `Chord Code 1.2.2 macOS.pkg`.
 
 ## GitHub Actions
 

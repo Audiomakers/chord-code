@@ -10,7 +10,7 @@ float normalisationGain(ccp::Timbre timbre){
   case ccp::Timbre::electricPiano:return .938f;
   case ccp::Timbre::synthSaw:return 3.410f;
   case ccp::Timbre::organ:return 1.820f;
-  case ccp::Timbre::piano:return 1.900f;
+  case ccp::Timbre::piano:return 1.380f;
   case ccp::Timbre::atmosphericPad:return 0.610f;
   case ccp::Timbre::violin:return 0.553f;
   case ccp::Timbre::flute:return 0.834f;
@@ -46,21 +46,6 @@ void ProPreviewVoice::startNote(int note,float vel,juce::SynthesiserSound*,int){
  };
  juce::ADSR::Parameters p;
  switch(timbre){
-  case ccp::Timbre::piano:{
-   // Slightly inharmonic string partials; upper partials die away faster,
-   // and a second detuned string on the lower partials adds natural beating.
-   const double inharmonicity=.00028*std::pow(2.0,(note-60)/24.0);
-   const double sustain=juce::jlimit(.9,7.0,4.8*std::pow(2.0,-(note-48)/18.0));
-   const float brightness=.42f+.40f*velocity;
-   for(int n=1;n<=12;++n){
-    const double f=hz*n*std::sqrt(1.0+inharmonicity*n*n);
-    const float amp=(float)(std::pow(brightness,(float)(n-1))/std::pow((double)n,.9));
-    addPartial(f,amp*(n<=4?.62f:1.0f),sustain/(1.0+.55*(n-1)));
-    if(n<=4)addPartial(f*1.0011,amp*.38f,sustain*.85/(1.0+.55*(n-1)));
-   }
-   clickAmp=.10f*velocity;clickDecay=perSampleDecay(.004,sr);
-   p={.001f,.0f,1.0f,.32f};break;
-  }
   case ccp::Timbre::organ:{
    // Drawbars 16', 8', 5 1/3', 4', 2 2/3', 2', 1 3/5', 1'.
    static constexpr double ratios[]{.5,1.0,1.5,2.0,3.0,4.0,5.0,8.0};
@@ -76,7 +61,7 @@ void ProPreviewVoice::startNote(int note,float vel,juce::SynthesiserSound*,int){
    p={.012f,.35f,.82f,.30f};break;
   }
   case ccp::Timbre::electricPiano:
-  case ccp::Timbre::atmosphericPad:case ccp::Timbre::violin:case ccp::Timbre::flute:case ccp::Timbre::count:
+  case ccp::Timbre::piano:case ccp::Timbre::atmosphericPad:case ccp::Timbre::violin:case ccp::Timbre::flute:case ccp::Timbre::count:
   default:
    p={.002f,.0f,1.0f,.45f};break;
  }
@@ -84,14 +69,6 @@ void ProPreviewVoice::startNote(int note,float vel,juce::SynthesiserSound*,int){
 }
 
 void ProPreviewVoice::stopNote(float,bool tail){env.noteOff();if(!tail){env.reset();clearCurrentNote();}}
-
-float ProPreviewVoice::renderPiano(){
- float x=0;
- for(int i=0;i<partialCount;++i)x+=partials[(size_t)i].tick();
- // Hammer: a short low-passed noise thump.
- clickState+=.25f*(noise()*clickAmp-clickState);clickAmp*=clickDecay;
- return x*.55f+clickState;
-}
 
 float ProPreviewVoice::renderRhodes(){
  // Tine and tonebar: FM with a decaying index for the bell-like attack.
@@ -150,11 +127,10 @@ void ProPreviewVoice::renderNextBlock(juce::AudioBuffer<float>&b,int start,int c
  while(count--){
   float left=0,right=0,voicePan=pan;
   switch(timbre){
-   case ccp::Timbre::piano:left=right=renderPiano();break;
    case ccp::Timbre::organ:{float rotor=0;left=right=renderOrgan(rotor);voicePan=juce::jlimit(-.8f,.8f,pan*.5f+rotor);break;}
    case ccp::Timbre::synthSaw:renderSaw(left,right);voicePan=0;break;
    case ccp::Timbre::electricPiano:left=right=renderRhodes();break;
-   case ccp::Timbre::atmosphericPad:case ccp::Timbre::violin:case ccp::Timbre::flute:case ccp::Timbre::count:
+   case ccp::Timbre::piano:case ccp::Timbre::atmosphericPad:case ccp::Timbre::violin:case ccp::Timbre::flute:case ccp::Timbre::count:
    default:break;
   }
   const float gain=level*env.getNextSample();
@@ -183,16 +159,37 @@ void PreviewSynth::addSample(juce::Synthesiser& synth,const char* name,const voi
  }
 }
 
+// Acoustic piano: Salamander Grand Piano samples (Alexander Holm, CC BY 3.0),
+// one every minor third; each covers its own note and the two neighbours.
+void PreviewSynth::addPiano(juce::Synthesiser& synth){
+ for(int i=0;i<40;++i)synth.addVoice(new juce::SamplerVoice);
+ static constexpr const char* names[]{"C","Ds","Fs","A"};
+ juce::OggVorbisAudioFormat ogg;
+ for(int note=36;note<=96;note+=3){
+  const auto resource=juce::String("piano_")+names[(note/3)%4]+juce::String(note/12-1)+"_ogg";
+  int size=0;
+  const auto* data=BinaryData::getNamedResource(resource.toRawUTF8(),size);
+  if(data==nullptr)continue;
+  auto stream=std::make_unique<juce::MemoryInputStream>(data,(size_t)size,false);
+  if(auto reader=std::unique_ptr<juce::AudioFormatReader>(ogg.createReaderFor(stream.release(),true))){
+   juce::BigInteger notes;
+   notes.setRange(note==36?0:note-1,note==36?38:(note==96?32:3),true);
+   synth.addSound(new juce::SamplerSound(resource,*reader,notes,note,.002,.28,8.0));
+  }
+ }
+}
+
 PreviewSynth::PreviewSynth(){
  for(int i=0;i<48;++i)procedural.addVoice(new ProPreviewVoice);
  procedural.addSound(new ProPreviewSound);
+ addPiano(piano);
  addSample(pad,"Pad C4",BinaryData::pad_C4_wav,BinaryData::pad_C4_wavSize,60);
  addSample(violin,"Violino F4",BinaryData::violin_F4_wav,BinaryData::violin_F4_wavSize,65);
  addSample(flute,"Flauta F#4",BinaryData::flute_Fsharp4_wav,BinaryData::flute_Fsharp4_wavSize,66);
  setTimbre(current);
 }
 void PreviewSynth::prepare(double sr,int maximumBlockSize){
- for(auto*s:{&procedural,&pad,&violin,&flute}){
+ for(auto*s:{&procedural,&piano,&pad,&violin,&flute}){
   s->allNotesOff(0,false);
   s->setCurrentPlaybackSampleRate(sr);
   s->setMinimumRenderingSubdivisionSize(1,true);
@@ -202,26 +199,26 @@ void PreviewSynth::prepare(double sr,int maximumBlockSize){
 }
 void PreviewSynth::render(juce::AudioBuffer<float>&b,juce::MidiBuffer&m){
  auto* selected=&procedural;
- if(current==ccp::Timbre::atmosphericPad)selected=&pad;else if(current==ccp::Timbre::violin)selected=&violin;else if(current==ccp::Timbre::flute)selected=&flute;
+ if(current==ccp::Timbre::piano)selected=&piano;else if(current==ccp::Timbre::atmosphericPad)selected=&pad;else if(current==ccp::Timbre::violin)selected=&violin;else if(current==ccp::Timbre::flute)selected=&flute;
  // Keep rendering released voices even when the selected instrument changes.
  for(int offset=0;offset<b.getNumSamples();offset+=scratch.getNumSamples()){
   const int count=juce::jmin(scratch.getNumSamples(),b.getNumSamples()-offset);
-  for(auto*s:{&procedural,&pad,&violin,&flute}){
+  for(auto*s:{&procedural,&piano,&pad,&violin,&flute}){
    scratch.clear();chunkEvents.clear();
    if(s==selected)chunkEvents.addEvents(m,offset,count,-offset);
    s->renderNextBlock(scratch,chunkEvents,0,count);
-   const float gain=s==&pad?normalisationGain(ccp::Timbre::atmosphericPad):s==&violin?normalisationGain(ccp::Timbre::violin):s==&flute?normalisationGain(ccp::Timbre::flute):1.0f;
+   const float gain=s==&piano?normalisationGain(ccp::Timbre::piano):s==&pad?normalisationGain(ccp::Timbre::atmosphericPad):s==&violin?normalisationGain(ccp::Timbre::violin):s==&flute?normalisationGain(ccp::Timbre::flute):1.0f;
    for(int c=0;c<juce::jmin(2,b.getNumChannels());++c)b.addFrom(c,offset,scratch,c,0,count,gain);
   }
  }
  for(int c=0;c<b.getNumChannels();++c)for(int i=0;i<b.getNumSamples();++i)b.setSample(c,i,std::tanh(b.getSample(c,i)*.82f));
 }
 bool PreviewSynth::isActive() const{
- for(auto*s:{&procedural,&pad,&violin,&flute})
+ for(auto*s:{&procedural,&piano,&pad,&violin,&flute})
   for(int i=0;i<s->getNumVoices();++i)if(s->getVoice(i)->isVoiceActive())return true;
  return false;
 }
-void PreviewSynth::allNotesOff(bool allowTailOff){for(auto*s:{&procedural,&pad,&violin,&flute})s->allNotesOff(0,allowTailOff);}
+void PreviewSynth::allNotesOff(bool allowTailOff){for(auto*s:{&procedural,&piano,&pad,&violin,&flute})s->allNotesOff(0,allowTailOff);}
 void PreviewSynth::setTimbre(ccp::Timbre t){
  allNotesOff();current=t;
  for(int i=0;i<procedural.getNumVoices();++i)if(auto*v=dynamic_cast<ProPreviewVoice*>(procedural.getVoice(i)))v->setTimbre(t);

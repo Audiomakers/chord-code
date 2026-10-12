@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   build:
-    name: Windows VST3, Standalone and installer
+    name: Windows installer (app + VST3)
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -34,7 +34,7 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -A x64
 
-      - name: Build installer, Standalone and tests
+      - name: Build installer and tests
         run: cmake --build build --config Release --parallel --target ChordCodeProInstaller ChordCodePro_Standalone chordcode_pro_tests chordcode_audio_tests
 
       - name: Run tests
@@ -45,7 +45,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist-windows | Out-Null
           Copy-Item "build/Release/Windows/ChordCodeProInstaller.exe" "dist-windows/Chord Code Setup.exe"
-          Copy-Item "build/ChordCodePro_artefacts/Release/Standalone/Chord Code.exe" "dist-windows/Chord Code Standalone.exe"
           Copy-Item -Recurse "build/ChordCodePro_artefacts/Release/VST3/Chord Code.vst3" "dist-windows/Chord Code.vst3"
 
       - name: Upload Windows build
