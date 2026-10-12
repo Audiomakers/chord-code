@@ -1,0 +1,57 @@
+name: Build Windows plugin
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "Source/**"
+      - "Installer/**"
+      - "Assets/**"
+      - ".github/workflows/windows-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "CMakeLists.txt"
+      - "Source/**"
+      - "Installer/**"
+      - "Assets/**"
+      - ".github/workflows/windows-build.yml"
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Windows VST3, Standalone and installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build installer, Standalone and tests
+        run: cmake --build build --config Release --parallel --target ChordCodeProInstaller ChordCodePro_Standalone chordcode_pro_tests chordcode_audio_tests
+
+      - name: Run tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Collect build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist-windows | Out-Null
+          Copy-Item "build/Release/Windows/ChordCodeProInstaller.exe" "dist-windows/Chord Code Setup.exe"
+          Copy-Item "build/ChordCodePro_artefacts/Release/Standalone/Chord Code.exe" "dist-windows/Chord Code Standalone.exe"
+          Copy-Item -Recurse "build/ChordCodePro_artefacts/Release/VST3/Chord Code.vst3" "dist-windows/Chord Code.vst3"
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v7
+        with:
+          name: chord-code-windows-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: dist-windows/
