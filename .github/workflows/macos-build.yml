@@ -2,6 +2,12 @@ name: Build macOS plugins
 
 on:
   workflow_dispatch:
+    inputs:
+      macos_min:
+        description: "Minimum macOS version (10.15 for the store build, 10.13 for High Sierra)"
+        required: false
+        default: "10.15"
+        type: string
   push:
     branches: [main]
     paths:
@@ -36,6 +42,7 @@ jobs:
     timeout-minutes: 45
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 3
+      CCP_MACOS_MIN: ${{ inputs.macos_min || '10.15' }}
 
     steps:
       - name: Checkout source
@@ -51,6 +58,7 @@ jobs:
         run: |
           cmake -S . -B build-core \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$CCP_MACOS_MIN" \
             -DCCP_FETCH_JUCE=OFF
           cmake --build build-core --config Release --target chordcode_pro_tests
           ctest --test-dir build-core -C Release --output-on-failure
@@ -66,7 +74,7 @@ jobs:
       - name: Upload macOS test build
         uses: actions/upload-artifact@v7
         with:
-          name: chord-code-pro-macos-${{ github.sha }}
+          name: chord-code-pro-macos${{ env.CCP_MACOS_MIN }}-${{ github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |

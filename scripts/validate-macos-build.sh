@@ -5,6 +5,7 @@ project_root="$(cd "$(dirname "$0")/.." && pwd)"
 build_dir="${CCP_BUILD_DIR:-$project_root/build-macos}"
 vst3="$build_dir/ChordCodePro_artefacts/Release/VST3/Chord Code.vst3"
 au="$build_dir/ChordCodePro_artefacts/Release/AU/Chord Code.component"
+macos_min="${CCP_MACOS_MIN:-10.15}"
 
 validate_bundle() {
   local bundle="$1"
@@ -24,9 +25,9 @@ validate_bundle() {
 
   minimum_system="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$bundle/Contents/Info.plist")"
   echo "$(basename "$bundle"): minimum macOS $minimum_system"
-  [[ "$minimum_system" == "10.15" ]]
+  [[ "$minimum_system" == "$macos_min" ]]
 
-  xcrun vtool -show-build -arch x86_64 "$executable" | grep -E 'minos[[:space:]]+10\.15'
+  xcrun vtool -show-build -arch x86_64 "$executable" | grep -E "minos[[:space:]]+${macos_min//./\\.}"
 
   codesign --verify --deep --strict --verbose=2 "$bundle"
 }

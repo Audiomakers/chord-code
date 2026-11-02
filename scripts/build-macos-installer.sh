@@ -7,6 +7,7 @@ stage_dir="$build_dir/package-root"
 dist_dir="${CCP_DIST_DIR:-$project_root/dist-macos}"
 cmake_version="$(sed -nE 's/^project\(ChordCodePro VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' "$project_root/CMakeLists.txt")"
 version="${CCP_VERSION:-$cmake_version}"
+macos_min="${CCP_MACOS_MIN:-10.15}"
 
 if [[ -z "$version" ]]; then
   echo "Unable to determine project version from CMakeLists.txt." >&2
@@ -20,7 +21,7 @@ fi
 
 cmake -S "$project_root" -B "$build_dir" -G Xcode \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET="$macos_min" \
   -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
   -DCCP_FETCH_JUCE=ON
 
