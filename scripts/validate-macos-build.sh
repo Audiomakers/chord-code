@@ -27,7 +27,8 @@ validate_bundle() {
   echo "$(basename "$bundle"): minimum macOS $minimum_system"
   [[ "$minimum_system" == "$macos_min" ]]
 
-  xcrun vtool -show-build -arch x86_64 "$executable" | grep -E "minos[[:space:]]+${macos_min//./\\.}"
+  # Targets below 10.14 get LC_VERSION_MIN_MACOSX ("version"), newer ones LC_BUILD_VERSION ("minos").
+  xcrun vtool -show-build -arch x86_64 "$executable" | grep -E "(minos|version)[[:space:]]+${macos_min}([^0-9]|$)"
 
   codesign --verify --deep --strict --verbose=2 "$bundle"
 }
