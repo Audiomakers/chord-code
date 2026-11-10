@@ -10,12 +10,16 @@
 class MidiDragButton final : public juce::TextButton {
 public:
     std::function<void()> dragAction;
+    // Plain click (no drag): fallback for hosts/setups where an external drag can't start.
+    std::function<void()> clickAction;
     void mouseDown(const juce::MouseEvent& e) override { started = false; juce::TextButton::mouseDown(e); }
     void mouseDrag(const juce::MouseEvent& e) override {
         if (!started && e.getDistanceFromDragStart() > 5 && dragAction) { started = true; dragAction(); }
         else if (!started) juce::TextButton::mouseDrag(e);
     }
     void mouseUp(const juce::MouseEvent& e) override { juce::TextButton::mouseUp(e); started = false; }
+protected:
+    void clicked() override { if (!started && clickAction) clickAction(); }
 private:
     bool started {};
 };
@@ -104,7 +108,10 @@ private:
     void refresh();
     void selectCard(int);
     void exportDrag();
+    void revealMidiForDrag();
     void saveMidi();
+    void showMidiProblem(const juce::String& title, const juce::String& message);
+    juce::File writeDragFile(juce::String& error);
     void showHistory();
     void showChordChoices(int);
     void showSettings();

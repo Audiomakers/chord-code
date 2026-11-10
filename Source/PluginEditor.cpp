@@ -59,14 +59,80 @@ juce::String chordNotes(const ccp::Chord& chord) {
     return notes.joinIntoString(utf("  ·  "));
 }
 
+// ---- MIDI export helpers -------------------------------------------------------------
+// Never hand a UTF-8 std::string to std::filesystem on Windows: it is decoded with the ANSI
+// code page, so any accented user folder (C:\Users\João\...) turns into a path that doesn't
+// exist and the write silently fails. juce::File uses the wide (UTF-16) Win32 API.
+bool isPlainAscii(const juce::String& text) {
+    for (auto c : text) if (c > 127) return false;
+    return true;
+}
+
+bool writeMidiBytes(const juce::File& file, const std::vector<uint8_t>& bytes, juce::String& error) {
+    const auto dir = file.getParentDirectory();
+    if (const auto made = dir.createDirectory(); made.failed()) {
+        error = made.getErrorMessage();
+        return false;
+    }
+    if (!file.replaceWithData(bytes.data(), bytes.size())) {
+        // replaceWithData writes a temp file and renames it; some antivirus / OneDrive setups
+        // block the rename. Try a plain direct write before giving up.
+        juce::FileOutputStream out(file);
+        if (!out.openedOk()) {
+            error = out.getStatus().failed() ? out.getStatus().getErrorMessage() : juce::String("sem permissão de escrita");
+            return false;
+        }
+        out.setPosition(0);
+        out.truncate();
+        out.write(bytes.data(), bytes.size());
+        out.flush();
+        if (out.getStatus().failed()) { error = out.getStatus().getErrorMessage(); return false; }
+    }
+    if (!file.existsAsFile() || file.getSize() != (juce::int64) bytes.size()) {
+        error = utf("o arquivo não ficou no disco (antivírus ou Acesso Controlado a Pastas?)");
+        return false;
+    }
+    return true;
+}
+
+// Where the drag file is written, best first. Plain-ASCII folders go first because a few
+// hosts mishandle dropped paths with accents; protected folders (Documents, Music) are last
+// because Windows "Controlled folder access" blocks DAWs that aren't on its allow list.
+juce::Array<juce::File> dragFolders() {
+    const auto sub = [](const juce::File& base) { return base.getChildFile("Audio Makers").getChildFile("Chord Code"); };
+    juce::Array<juce::File> candidates;
+    candidates.add(sub(juce::File::getSpecialLocation(juce::File::tempDirectory)));
+   #if JUCE_WINDOWS
+    if (const auto local = juce::SystemStats::getEnvironmentVariable("LOCALAPPDATA", {}); local.isNotEmpty())
+        candidates.add(sub(juce::File(local)).getChildFile("MIDI"));
+    if (const auto pub = juce::SystemStats::getEnvironmentVariable("PUBLIC", {}); pub.isNotEmpty())
+        candidates.add(sub(juce::File(pub)).getChildFile("MIDI"));
+    candidates.add(sub(juce::File::getSpecialLocation(juce::File::commonApplicationDataDirectory)).getChildFile("MIDI"));
+   #endif
+    candidates.add(sub(juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)).getChildFile("MIDI"));
+    candidates.add(sub(juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)));
+    candidates.add(sub(juce::File::getSpecialLocation(juce::File::userMusicDirectory)));
+
+    juce::Array<juce::File> ascii, other;
+    for (const auto& dir : candidates) {
+        if (dir.getFullPathName().length() < 4 || ascii.contains(dir) || other.contains(dir)) continue;
+        (isPlainAscii(dir.getFullPathName()) ? ascii : other).add(dir);
+    }
+    ascii.addArray(other);
+    return ascii;
+}
+
 juce::String chordFileStem(const ccp::Progression& progression) {
     juce::StringArray names;
     for (int i = 0; i < progression.chordCount; ++i) {
         auto name = utf(progression.chords[(size_t) i].name.c_str());
         for (auto invalid : juce::String("/\\:*?\"<>| ")) name = name.replaceCharacter(invalid, '_');
-        names.add(name);
+        juce::String safe;
+        for (auto c : name) safe << (c > 31 && c < 127 ? juce::String::charToString(c) : juce::String("_"));
+        names.add(safe);
     }
-    return names.joinIntoString("-").substring(0, 120);
+    auto stem = names.joinIntoString("-").substring(0, 100).trimCharactersAtEnd("._ ");
+    return stem.isEmpty() ? juce::String("Chord Code") : stem;
 }
 
 // Right-click chord picker. "Campo harmônico" groups the scale's chords by degree;
@@ -687,6 +753,7 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
         }
     };
     drag.dragAction = [this] { exportDrag(); };
+    drag.clickAction = [this] { revealMidiForDrag(); };
     save.onClick = [this] { saveMidi(); };
 
     addChildComponent(overlay);
@@ -932,30 +999,91 @@ void ChordCodeProEditor::updateFromSettings() {
     ignore = false;
 }
 
-void ChordCodeProEditor::exportDrag() {
+juce::File ChordCodeProEditor::writeDragFile(juce::String& error) {
     const auto progression = pro.getProgression();
-    auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("Audio Makers").getChildFile("Chord Code");
-    dir.createDirectory();
-    for (const auto& old : dir.findChildFiles(juce::File::findFiles, false, "*.mid"))
-        if (old.getLastModificationTime() < juce::Time::getCurrentTime() - juce::RelativeTime::days(3)) old.deleteFile();
-    auto file = dir.getNonexistentChildFile(chordFileStem(progression), ".mid", false);
-    if (ccp::MidiFile::write(progression, file.getFullPathName().toStdString(), pro.midiOptions()))
-        juce::DragAndDropContainer::performExternalDragDropOfFiles({ file.getFullPathName() }, true, this);
+    const auto bytes = ccp::MidiFile::bytes(progression, pro.midiOptions());
+    const auto stem = chordFileStem(progression);
+    for (const auto& dir : dragFolders()) {
+        if (dir.isDirectory())
+            for (const auto& old : dir.findChildFiles(juce::File::findFiles, false, "*.mid"))
+                if (old.getLastModificationTime() < juce::Time::getCurrentTime() - juce::RelativeTime::days(3)) old.deleteFile();
+        auto file = dir.getNonexistentChildFile(stem, ".mid", false);
+        juce::String why;
+        if (writeMidiBytes(file, bytes, why)) return file;
+        error << dir.getFullPathName() << "  ->  " << why << "\n";
+    }
+    return {};
+}
+
+void ChordCodeProEditor::exportDrag() {
+    juce::String error;
+    const auto file = writeDragFile(error);
+    if (!file.existsAsFile()) {
+        showMidiProblem(utf("Não deu pra criar o MIDI"),
+            utf("O Windows bloqueou a gravação do arquivo em todas as pastas que o Chord Code tentou.\n\n")
+            + error.trim()
+            + utf("\n\nSe o \"Acesso controlado a pastas\" do Windows Defender estiver ligado, libere a sua DAW e o Chord Code nele."));
+        return;
+    }
+    // Copy only: hosts that "move" the dropped file would delete it from under us.
+    const bool started = juce::DragAndDropContainer::performExternalDragDropOfFiles({ file.getFullPathName() }, false, this);
+    if (!started) revealMidiForDrag();
+}
+
+void ChordCodeProEditor::revealMidiForDrag() {
+    juce::String error;
+    const auto file = writeDragFile(error);
+    if (!file.existsAsFile()) {
+        showMidiProblem(utf("Não deu pra criar o MIDI"), error.trim());
+        return;
+    }
+    file.revealToUser();
+    showMidiProblem(utf("MIDI pronto"),
+        utf("Abrimos a pasta com o arquivo:\n") + file.getFileName()
+        + utf("\n\nArraste ele da pasta direto para a timeline da sua DAW.\n(Dica: para arrastar do plugin, clique em ARRASTAR MIDI e, sem soltar, puxe até a DAW.)"));
+}
+
+void ChordCodeProEditor::showMidiProblem(const juce::String& title, const juce::String& message) {
+    auto options = juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::NoIcon)
+        .withTitle(title)
+        .withMessage(message)
+        .withButton("OK")
+        .withAssociatedComponent(this);
+    juce::AlertWindow::showAsync(options, nullptr);
 }
 
 void ChordCodeProEditor::saveMidi() {
     const auto progression = pro.getProgression();
-    chooser = std::make_unique<juce::FileChooser>(utf("Salvar acordes MIDI"),
-        juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
-            .getChildFile(chordFileStem(progression) + ".mid"), "*.mid");
+    const auto stem = chordFileStem(progression);
+    auto startDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+    if (!startDir.isDirectory()) startDir = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+    chooser = std::make_unique<juce::FileChooser>(utf("Salvar acordes MIDI"), startDir.getChildFile(stem + ".mid"), "*.mid");
     juce::Component::SafePointer<ChordCodeProEditor> safe(this);
-    chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+    chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                         | juce::FileBrowserComponent::warnAboutOverwriting,
         [safe](const juce::FileChooser& fc) {
             if (safe == nullptr) return;
-            const auto file = fc.getResult();
-            if (file == juce::File {}) return;
-            const auto path = file.withFileExtension("mid").getFullPathName().toStdString();
-            ccp::MidiFile::write(safe->pro.getProgression(), path, safe->pro.midiOptions());
+            const auto chosen = fc.getResult();
+            if (chosen == juce::File {}) return;
+            const auto file = chosen.withFileExtension("mid");
+            const auto bytes = ccp::MidiFile::bytes(safe->pro.getProgression(), safe->pro.midiOptions());
+            juce::String why;
+            if (writeMidiBytes(file, bytes, why)) return;
+
+            // The chosen folder refused the write (usually Windows "Controlled folder access" on
+            // Documents/Desktop, or a OneDrive folder offline). Save to a safe folder and show it.
+            juce::String error;
+            const auto fallback = safe->writeDragFile(error);
+            if (fallback.existsAsFile()) {
+                fallback.revealToUser();
+                safe->showMidiProblem(utf("MIDI salvo em outra pasta"),
+                    utf("O Windows não deixou salvar em:\n") + file.getFullPathName() + "\n(" + why + ")"
+                    + utf("\n\nSalvamos aqui e abrimos a pasta:\n") + fallback.getFullPathName());
+            } else {
+                safe->showMidiProblem(utf("Não deu pra salvar o MIDI"),
+                    file.getFullPathName() + "\n(" + why + ")\n\n" + error.trim());
+            }
         });
 }
 
