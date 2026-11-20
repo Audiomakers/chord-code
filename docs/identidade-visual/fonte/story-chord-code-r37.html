@@ -1,0 +1,83 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=block" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1080px;height:1920px;background:#070708;overflow:hidden}
+body{font-family:Inter,sans-serif;color:#f4f4f0;position:relative;
+ background:
+  radial-gradient(700px 520px at 50% 800px, rgba(255,90,20,.20), transparent 70%),
+  radial-gradient(500px 400px at 8% 1150px, rgba(255,60,10,.10), transparent 70%),
+  radial-gradient(500px 400px at 95% 1150px, rgba(255,150,40,.08), transparent 70%),
+  linear-gradient(180deg,#111214 0%,#0a0a0c 45%,#060607 100%);}
+.wrap{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center}
+.pill{margin-top:190px;height:58px;padding:0 34px;border:2px solid #34363a;border-radius:40px;display:flex;align-items:center;gap:26px;
+ font-family:'Space Grotesk';font-weight:600;font-size:27px;letter-spacing:5px;color:#e9e9e6;background:rgba(255,255,255,.02)}
+.dots{display:flex;gap:8px}.dots i{width:12px;height:12px;border-radius:50%;display:block}
+h1{margin-top:38px;font-weight:900;font-size:136px;letter-spacing:-5px;line-height:1;display:flex;align-items:center;gap:30px}
+h1 .code{color:#ff5a14}
+.logo{width:120px;height:120px;border-radius:28px;background:linear-gradient(160deg,#ff8a3d,#ff4d0a);display:flex;align-items:center;justify-content:center;gap:7px;box-shadow:0 10px 40px rgba(255,90,20,.45)}
+.logo b{display:block;width:9px;border-radius:5px;background:#fff}
+.sub{margin-top:30px;font-family:'Space Grotesk';font-weight:700;font-size:66px;letter-spacing:-1px;
+ background:linear-gradient(90deg,#ff3d1f 0%,#ff6a14 40%,#ffa23a 75%,#ffc76b 100%);-webkit-background-clip:text;color:transparent}
+.stage{position:relative;width:1080px;height:560px;margin-top:40px}
+.card{position:absolute;top:50%;left:50%;width:330px;height:430px;border-radius:30px;
+ background:linear-gradient(180deg,#1b1c1f,#121315);border:2px solid #2c2e32;
+ box-shadow:0 30px 60px rgba(0,0,0,.6);padding:26px 26px;display:flex;flex-direction:column;align-items:center}
+.card .top{width:100%;display:flex;justify-content:space-between;align-items:center}
+.num{font-family:'Space Grotesk';font-weight:600;font-size:22px;color:#8b8e92;background:#232528;border-radius:10px;padding:5px 11px}
+.icons{display:flex;gap:14px;align-items:center}
+.icons svg{width:28px;height:28px;stroke:#9a9da1;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.name{margin-top:52px;font-weight:800;font-size:76px;letter-spacing:-2px}
+.deg{margin-top:18px;display:flex;align-items:center;gap:12px;font-family:'Space Grotesk';font-weight:500;font-size:24px;color:#8b8e92}
+.deg span{font-weight:700;font-size:20px;color:#ff6a14;background:rgba(255,90,20,.14);border-radius:50px;min-width:38px;height:34px;padding:0 10px;display:flex;align-items:center;justify-content:center}
+.wave{margin-top:auto;margin-bottom:22px;display:flex;align-items:center;gap:9px;height:80px}
+.wave i{display:block;width:10px;border-radius:6px;background:#4a4d52}
+.card.on{border:3px solid #ff5a14;background:linear-gradient(180deg,#2a1a12,#161211);box-shadow:0 0 0 1px rgba(255,90,20,.3),0 0 80px rgba(255,90,20,.35),0 40px 80px rgba(0,0,0,.7)}
+.card.on .num{color:#ff6a14;background:rgba(255,90,20,.15)}
+.card.on .wave i{background:linear-gradient(180deg,#ffb35c,#ff5a14)}
+.card.on .icons svg.play{fill:#fff;stroke:#fff}
+.styles{margin-top:40px;display:flex;gap:40px;font-family:'Space Grotesk';font-weight:700;font-size:36px;letter-spacing:4px}
+.price{margin-top:40px;font-weight:700;font-size:96px;letter-spacing:-3px}
+.price s{font-size:48px;color:#7d8084;font-weight:600;text-decoration-thickness:4px;margin-right:6px;letter-spacing:-1px}
+.price b{color:#ff5a14;font-weight:800}
+.small{margin-top:20px;font-size:35px;color:#a3a6a9;font-weight:500}
+.cta{margin-top:44px;font-family:'Space Grotesk';font-weight:700;font-size:38px;letter-spacing:8px}
+.chev{margin-top:30px}
+</style></head><body><div class="wrap">
+ <div class="pill"><div class="dots"><i style="background:#ff3d1f"></i><i style="background:#ff5a14"></i><i style="background:#ff7a1f"></i><i style="background:#ff9a33"></i><i style="background:#ffbe5c"></i></div>13 ESTILOS · 12 VIBES · MIDI</div>
+ <h1><span>CHORD<span class="code"> CODE</span></span></h1>
+ <div class="sub">Um clique. Acordes prontos.</div>
+ <div class="stage" id="stage"></div>
+ <div class="styles" id="styles"></div>
+ <div class="price">Por só <b>R$37</b></div>
+ <div class="small">de <s style="color:#7d8084">R$97</s> · Pagamento único · Windows e Mac</div>
+ <div class="cta">TOQUE NO LINK</div>
+ <svg class="chev" width="70" height="40" viewBox="0 0 70 40"><path d="M4 4 L35 34 L66 4" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+</div>
+<script>
+const cards=[
+ {n:'01',c:'Cm9',d:'i',notes:'C · D# · G · A#',x:-420,y:40,r:-12,s:.78,z:1},
+ {n:'02',c:'G#maj7',d:'VI',notes:'G# · C · D# · G',x:-235,y:8,r:-6,s:.88,z:2},
+ {n:'03',c:'A#add9',d:'VII',notes:'A# · D · F · C',x:0,y:-10,r:0,s:1.08,z:5,on:1},
+ {n:'04',c:'Fm7',d:'iv',notes:'F · G# · C · D#',x:235,y:8,r:6,s:.88,z:2},
+ {n:'05',c:'Gm7',d:'v',notes:'G · A# · D · F',x:420,y:40,r:12,s:.78,z:1},
+];
+const H=[26,40,58,74,58,40,62,46,30];
+const st=document.getElementById('stage');
+for(const k of cards){
+ const el=document.createElement('div');el.className='card'+(k.on?' on':'');
+ el.style.transform=`translate(-50%,-50%) translate(${k.x}px,${k.y}px) rotate(${k.r}deg) scale(${k.s})`;
+ el.style.zIndex=k.z; if(!k.on) el.style.filter=k.s<.8?'brightness(.62)':'brightness(.8)';
+ const fs=k.c.length>5?60:76;
+ el.innerHTML=`<div class="top"><div class="num">${k.n}</div><div class="icons">
+  <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+  <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+  ${k.on?'<svg class="play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>':''}</div></div>
+  <div class="name" style="font-size:${fs}px">${k.c}</div>
+  <div class="deg"><span>${k.d}</span>${k.notes}</div>
+  <div class="wave">${H.map(h=>`<i style="height:${h}px"></i>`).join('')}</div>`;
+ st.appendChild(el);
+}
+const sty=[['TRAP','#ff3d1f'],['R&B','#ff5a14'],['FUNK','#ff7a1f'],['LO-FI','#ff9a33'],['PHONK','#ffbe5c']];
+document.getElementById('styles').innerHTML=sty.map(([t,c])=>`<span style="color:${c}">${t}</span>`).join('');
+</script></body></html>
