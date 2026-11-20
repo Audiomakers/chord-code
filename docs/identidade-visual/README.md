@@ -141,7 +141,7 @@ Padrão tipográfico dos títulos de marketing: primeira linha branca, segunda l
 - Divisória horizontal sob o cabeçalho: linha que some nas pontas (gradiente transparente → cinza → transparente).
 
 ### 2.6 Logo e ícone
-- **Ícone**: quadrado arredondado laranja (gradiente laranja/âmbar) com **barras verticais de forma de onda** em escuro (lembra um equalizador / waveform). Arquivos: no repo `edferrazzz/chord-code-mini`, pasta `Assets/Brand/` (`chord-code-mini-icon-1024.png`, `.svg`, `.ico`).
+- **Ícone**: quadrado arredondado laranja (gradiente laranja/âmbar) com **barras verticais de forma de onda** em escuro (lembra um equalizador / waveform). Arquivos: [`Assets/Brand/`](../../Assets/Brand/) (`chord-code-pro-icon-1024.png`, `.svg`, `.ico`).
 - **Wordmark**: "CHORD" em branco + "CODE" em laranja (gradiente laranja → âmbar), Bold, caixa alta. No Mini, vem seguido de "MINI" em cinza claro, fino e espaçado.
 - Assinatura: **AUDIO MAKERS** em caixa alta espaçada (no Mini: "AUDIO" cinza, "MAKERS" laranja).
 - Variação do vídeo final: "Chord Code **Pro**" em caixa mista, "Pro" em laranja.
