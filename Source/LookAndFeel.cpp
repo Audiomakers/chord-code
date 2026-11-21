@@ -87,7 +87,7 @@ void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool
     g.setColour(colour);
     g.setFont(primary ? font(26.0f, true).withExtraKerningFactor(0.14f) : labelFont(16.5f));
     auto textArea = b.getLocalBounds().toFloat();
-    const bool icon = id == "play" || id == "variation" || id == "random" || id == "history" || id == "drag" || id == "save";
+    const bool icon = id == "play" || id == "variation" || id == "random" || id == "history" || id == "drag" || id == "dragWav" || id == "save";
     if (icon) textArea = textArea.withTrimmedLeft(34.0f);
     g.drawFittedText(b.getButtonText(), textArea.toNearestInt().reduced(8, 0), juce::Justification::centred, 1);
     if (!icon) return;
@@ -101,7 +101,7 @@ void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool
     } else if (id == "variation") drawSvg(g, variationIcon.get(), iconArea);
     else if (id == "random") drawSvg(g, randomIcon.get(), iconArea.withSizeKeepingCentre(24.0f, 24.0f));
     else if (id == "history") drawHistoryIcon(g, iconArea, colour);
-    else if (id == "drag") drawSvg(g, dragIcon.get(), iconArea);
+    else if (id == "drag" || id == "dragWav") drawSvg(g, dragIcon.get(), iconArea);
     else if (id == "save") drawSvg(g, saveIcon.get(), iconArea);
 }
 

@@ -81,6 +81,32 @@ int main(int argc, char** argv) {
             for (int block = 0; block < (count * 48000 / blockSize) + 600; ++block) processor.processBlock(audio, midi);
             require(processor.activeChord() == -1, "Sequence did not stop");
         }
+        // WAV export: valid 24-bit stereo file, exactly one loop long, normalised, every timbre and rhythm.
+        processor.setChordCount(4);
+        for (int timbre = 0; timbre < (int) ccp::Timbre::count; ++timbre) {
+            for (int rhythm = 0; rhythm < 4; ++rhythm) {
+                choice(processor, "timbre", timbre);
+                choice(processor, "rhythm", rhythm);
+                juce::MemoryBlock wavData;
+                require(processor.renderWav(wavData), "WAV render failed");
+                juce::WavAudioFormat format;
+                std::unique_ptr<juce::AudioFormatReader> reader(format.createReaderFor(new juce::MemoryInputStream(wavData, false), true));
+                require(reader != nullptr, "WAV unreadable");
+                require(reader->numChannels == 2 && reader->bitsPerSample == 24 && (int) reader->sampleRate == 44100, "WAV format");
+                const auto options = processor.midiOptions();
+                const auto expected = (juce::int64) std::llround(44100.0 * 60.0 / options.bpm * options.beatsPerChord) * 4;
+                require(reader->lengthInSamples == expected, "WAV is not exactly one loop long");
+                juce::AudioBuffer<float> wavAudio(2, (int) reader->lengthInSamples);
+                reader->read(&wavAudio, 0, wavAudio.getNumSamples(), 0, true, true);
+                const float peak = wavAudio.getMagnitude(0, wavAudio.getNumSamples());
+                require(peak > 0.85f && peak < 0.9f, "WAV not normalised to -1 dBFS");
+                for (int c = 0; c < 2; ++c)
+                    for (int i = 0; i < wavAudio.getNumSamples(); ++i)
+                        require(std::isfinite(wavAudio.getSample(c, i)), "Non-finite WAV sample");
+            }
+        }
+        choice(processor, "timbre", 0);
+        choice(processor, "rhythm", 0);
         processor.toggleLock(0);
         juce::MemoryBlock state; processor.getStateInformation(state);
         ChordCodeProProcessor restored;
@@ -100,6 +126,29 @@ int main(int argc, char** argv) {
             save(card, "active-card.png");
             auto editor = std::unique_ptr<juce::AudioProcessorEditor>(processor.createEditor());
             save(*editor, "interface.png");
+            require(editor->isResizable(), "Editor is not resizable");
+            for (int width : { 840, 1680 }) {
+                editor->setSize(width, juce::roundToInt(width * 875.0 / 1536.0));
+                save(*editor, (juce::String("interface-") + juce::String(width) + ".png").toRawUTF8());
+            }
+            {
+                SettingsPanel::Model model;
+                model.isSynced = [] { return false; };
+                model.manualBpm = [] { return 120; };
+                model.hostBpm = [] { return 120; };
+                model.setSynced = [](bool) {};
+                model.setManualBpm = [](int) {};
+                model.licenseEmail = [] { return juce::String("cliente@exemplo.com"); };
+                model.updateAvailable = [] { return false; };
+                model.windowScale = [] { return 1.0f; };
+                SettingsPanel panel(model);
+                save(panel, "settings.png");
+            }
+            if (argc > 2) {
+                juce::MemoryBlock wavData;
+                require(processor.renderWav(wavData), "WAV render failed");
+                folder.getChildFile("progressao.wav").replaceWithData(wavData.getData(), wavData.getSize());
+            }
         }
         std::cout << "Audio transitions, release highlights, 4/8 chord MIDI and state tests passed\n";
     } catch (const std::exception& error) {

@@ -7,9 +7,12 @@
 using namespace ChordCodeTheme;
 
 namespace {
-constexpr float editorScale = 1120.0f / (float) designWidth;
+// The 100% window is 1120 px wide; the layout is drawn in design units and scaled.
+constexpr float defaultWindowScale = 1120.0f / (float) designWidth;
+constexpr float minWindowScale = 0.6f, maxWindowScale = 2.0f;
 // Popups were designed for the original 960 px wide window.
-constexpr float panelScale = 1120.0f / 960.0f;
+constexpr float panelScaleAt100 = 1120.0f / 960.0f;
+constexpr const char* windowScaleKey = "windowScale";
 constexpr int cardPageWidth = 1324;
 juce::String utf(const char* text) { return juce::String::fromUTF8(text); }
 
@@ -658,8 +661,16 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     setOpaque(true);
     addAndMakeVisible(content);
     content.setInterceptsMouseClicks(false, true);
-    setSize(juce::roundToInt((float) designWidth * editorScale), juce::roundToInt((float) designHeight * editorScale));
-    setResizable(false, false);
+    // Resizable from the corner, keeping the layout's proportions. New windows open at the
+    // default size chosen in Configurações > Janela (saved per computer).
+    constrainer.setFixedAspectRatio((double) designWidth / (double) designHeight);
+    constrainer.setSizeLimits(juce::roundToInt(designWidth * defaultWindowScale * minWindowScale),
+                              juce::roundToInt(designHeight * defaultWindowScale * minWindowScale),
+                              juce::roundToInt(designWidth * defaultWindowScale * maxWindowScale),
+                              juce::roundToInt(designHeight * defaultWindowScale * maxWindowScale));
+    setConstrainer(&constrainer);
+    setResizable(true, true);
+    applyWindowScale((float) license->getPreference(windowScaleKey, 1.0));
 
     const char* notes[] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     for (int i = 0; i < 12; ++i) key.addItem(notes[i], i + 1);
@@ -722,12 +733,14 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
 
     for (auto* button : { (juce::Button*) &settings, (juce::Button*) &play, (juce::Button*) &variation,
                           (juce::Button*) &random, (juce::Button*) &generate, (juce::Button*) &history,
-                          (juce::Button*) &drag, (juce::Button*) &save })
+                          (juce::Button*) &drag, (juce::Button*) &dragWav, (juce::Button*) &save })
         content.addAndMakeVisible(*button);
     settings.setComponentID("settings"); settings.setTitle("Configurações");
     play.setComponentID("play"); variation.setComponentID("variation"); random.setComponentID("random");
     generate.setComponentID("generate"); history.setComponentID("history"); drag.setComponentID("drag"); save.setComponentID("save");
+    dragWav.setComponentID("dragWav");
     drag.setButtonText("ARRASTAR MIDI");
+    dragWav.setButtonText("ARRASTAR WAV");
 
     settings.onClick = [this] { showSettings(); };
     play.onClick = [this] { if (pro.activeChord() >= 0) pro.stopPreview(); else pro.playSequence(); };
@@ -752,9 +765,11 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
             animateToPage(4);
         }
     };
-    drag.dragAction = [this] { exportDrag(); };
-    drag.clickAction = [this] { revealMidiForDrag(); };
-    save.onClick = [this] { saveMidi(); };
+    drag.dragAction = [this] { exportDrag(ExportKind::midi); };
+    drag.clickAction = [this] { revealForDrag(ExportKind::midi); };
+    dragWav.dragAction = [this] { exportDrag(ExportKind::wav); };
+    dragWav.clickAction = [this] { revealForDrag(ExportKind::wav); };
+    save.onClick = [this] { showSaveMenu(); };
 
     addChildComponent(overlay);
     overlay.onDismiss = [this] { content.setEnabled(true); };
@@ -790,7 +805,7 @@ ChordCodeProEditor::~ChordCodeProEditor() {
 
 void ChordCodeProEditor::paint(juce::Graphics& g) {
     g.fillAll(juce::Colour(background));
-    g.addTransform(juce::AffineTransform::scale(editorScale));
+    g.addTransform(juce::AffineTransform::scale(uiScale()));
     const auto full = juce::Rectangle<float>(0.0f, 0.0f, (float) designWidth, (float) designHeight);
     g.setGradientFill(juce::ColourGradient(juce::Colour(backgroundTop), 0.0f, 0.0f,
                                            juce::Colour(background), 0.0f, full.getBottom(), false));
@@ -864,8 +879,9 @@ void ChordCodeProEditor::paint(juce::Graphics& g) {
 
 void ChordCodeProEditor::resized() {
     overlay.setBounds(getLocalBounds());
+    if (auto* panel = overlay.getPanel()) overlay.setPanelScale(panelScaleFor(*panel));
     content.setBounds(0, 0, designWidth, designHeight);
-    content.setTransform(juce::AffineTransform::scale(editorScale));
+    content.setTransform(juce::AffineTransform::scale(uiScale()));
     settings.setBounds(1465, 29, 38, 38);
     key.setBounds(34, 140, 320, 50); scale.setBounds(396, 140, 330, 50);
     style.setBounds(768, 140, 330, 50); mood.setBounds(1130, 140, 370, 50);
@@ -882,9 +898,27 @@ void ChordCodeProEditor::resized() {
     length.setBounds(981, 655, 188, 48);
     velocity.setBounds(1193, 647, 274, 64);
 
-    play.setBounds(34, 758, 168, 84); variation.setBounds(212, 758, 174, 84);
-    random.setBounds(396, 758, 176, 84); generate.setBounds(587, 757, 340, 84);
-    history.setBounds(942, 758, 168, 84); drag.setBounds(1120, 758, 190, 84); save.setBounds(1322, 758, 178, 84);
+    play.setBounds(34, 758, 160, 84); variation.setBounds(204, 758, 166, 84);
+    random.setBounds(380, 758, 168, 84); generate.setBounds(558, 757, 240, 84);
+    history.setBounds(808, 758, 156, 84); drag.setBounds(974, 758, 181, 84);
+    dragWav.setBounds(1165, 758, 181, 84); save.setBounds(1356, 758, 144, 84);
+}
+
+float ChordCodeProEditor::uiScale() const {
+    return getWidth() > 0 ? (float) getWidth() / (float) designWidth : defaultWindowScale;
+}
+
+void ChordCodeProEditor::applyWindowScale(float scale) {
+    const float s = defaultWindowScale * juce::jlimit(minWindowScale, maxWindowScale, std::isfinite(scale) ? scale : 1.0f);
+    setSize(juce::roundToInt((float) designWidth * s), juce::roundToInt((float) designHeight * s));
+}
+
+// Popups keep their proportion to the window, shrinking if needed so they always fit.
+float ChordCodeProEditor::panelScaleFor(const juce::Component& panel) const {
+    const float proportional = panelScaleAt100 * uiScale() / defaultWindowScale;
+    const float fitHeight = (float) getHeight() * 0.94f / (float) juce::jmax(1, panel.getHeight());
+    const float fitWidth = (float) getWidth() * 0.94f / (float) juce::jmax(1, panel.getWidth());
+    return juce::jmin(proportional, fitHeight, fitWidth);
 }
 
 void ChordCodeProEditor::setUpdateAvailable(bool available) {
@@ -999,15 +1033,30 @@ void ChordCodeProEditor::updateFromSettings() {
     ignore = false;
 }
 
-juce::File ChordCodeProEditor::writeDragFile(juce::String& error) {
-    const auto progression = pro.getProgression();
-    const auto bytes = ccp::MidiFile::bytes(progression, pro.midiOptions());
-    const auto stem = chordFileStem(progression);
+bool ChordCodeProEditor::exportBytes(ExportKind kind, std::vector<uint8_t>& bytes) {
+    if (kind == ExportKind::midi) {
+        bytes = ccp::MidiFile::bytes(pro.getProgression(), pro.midiOptions());
+        return !bytes.empty();
+    }
+    juce::MemoryBlock wav;
+    if (!pro.renderWav(wav)) return false;
+    bytes.assign(static_cast<const uint8_t*>(wav.getData()), static_cast<const uint8_t*>(wav.getData()) + wav.getSize());
+    return true;
+}
+
+juce::File ChordCodeProEditor::writeDragFile(ExportKind kind, juce::String& error) {
+    std::vector<uint8_t> bytes;
+    if (!exportBytes(kind, bytes)) {
+        error = kind == ExportKind::wav ? utf("não foi possível gerar o áudio") : utf("não foi possível gerar o MIDI");
+        return {};
+    }
+    const auto stem = chordFileStem(pro.getProgression());
+    const auto extension = kind == ExportKind::wav ? juce::String(".wav") : juce::String(".mid");
     for (const auto& dir : dragFolders()) {
         if (dir.isDirectory())
-            for (const auto& old : dir.findChildFiles(juce::File::findFiles, false, "*.mid"))
+            for (const auto& old : dir.findChildFiles(juce::File::findFiles, false, "*" + extension))
                 if (old.getLastModificationTime() < juce::Time::getCurrentTime() - juce::RelativeTime::days(3)) old.deleteFile();
-        auto file = dir.getNonexistentChildFile(stem, ".mid", false);
+        auto file = dir.getNonexistentChildFile(stem, extension, false);
         juce::String why;
         if (writeMidiBytes(file, bytes, why)) return file;
         error << dir.getFullPathName() << "  ->  " << why << "\n";
@@ -1015,11 +1064,12 @@ juce::File ChordCodeProEditor::writeDragFile(juce::String& error) {
     return {};
 }
 
-void ChordCodeProEditor::exportDrag() {
+void ChordCodeProEditor::exportDrag(ExportKind kind) {
+    const auto name = kind == ExportKind::wav ? juce::String("WAV") : juce::String("MIDI");
     juce::String error;
-    const auto file = writeDragFile(error);
+    const auto file = writeDragFile(kind, error);
     if (!file.existsAsFile()) {
-        showMidiProblem(utf("Não deu pra criar o MIDI"),
+        showMidiProblem(utf("Não deu pra criar o ") + name,
             utf("O Windows bloqueou a gravação do arquivo em todas as pastas que o Chord Code tentou.\n\n")
             + error.trim()
             + utf("\n\nSe o \"Acesso controlado a pastas\" do Windows Defender estiver ligado, libere a sua DAW e o Chord Code nele."));
@@ -1027,20 +1077,22 @@ void ChordCodeProEditor::exportDrag() {
     }
     // Copy only: hosts that "move" the dropped file would delete it from under us.
     const bool started = juce::DragAndDropContainer::performExternalDragDropOfFiles({ file.getFullPathName() }, false, this);
-    if (!started) revealMidiForDrag();
+    if (!started) revealForDrag(kind);
 }
 
-void ChordCodeProEditor::revealMidiForDrag() {
+void ChordCodeProEditor::revealForDrag(ExportKind kind) {
+    const auto name = kind == ExportKind::wav ? juce::String("WAV") : juce::String("MIDI");
     juce::String error;
-    const auto file = writeDragFile(error);
+    const auto file = writeDragFile(kind, error);
     if (!file.existsAsFile()) {
-        showMidiProblem(utf("Não deu pra criar o MIDI"), error.trim());
+        showMidiProblem(utf("Não deu pra criar o ") + name, error.trim());
         return;
     }
     file.revealToUser();
-    showMidiProblem(utf("MIDI pronto"),
+    showMidiProblem(name + " pronto",
         utf("Abrimos a pasta com o arquivo:\n") + file.getFileName()
-        + utf("\n\nArraste ele da pasta direto para a timeline da sua DAW.\n(Dica: para arrastar do plugin, clique em ARRASTAR MIDI e, sem soltar, puxe até a DAW.)"));
+        + utf("\n\nArraste ele da pasta direto para a timeline da sua DAW.\n(Dica: para arrastar do plugin, clique em ARRASTAR ")
+        + name + utf(" e, sem soltar, puxe até a DAW.)"));
 }
 
 void ChordCodeProEditor::showMidiProblem(const juce::String& title, const juce::String& message) {
@@ -1053,35 +1105,54 @@ void ChordCodeProEditor::showMidiProblem(const juce::String& title, const juce::
     juce::AlertWindow::showAsync(options, nullptr);
 }
 
-void ChordCodeProEditor::saveMidi() {
-    const auto progression = pro.getProgression();
-    const auto stem = chordFileStem(progression);
+void ChordCodeProEditor::showSaveMenu() {
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(&laf);
+    menu.addItem(1, "Salvar MIDI");
+    menu.addItem(2, utf("Salvar WAV (áudio com o timbre)"));
+    juce::Component::SafePointer<ChordCodeProEditor> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(save).withParentComponent(this),
+        [safe](int result) {
+            if (safe != nullptr && result > 0) safe->saveFile(result == 2 ? ExportKind::wav : ExportKind::midi);
+        });
+}
+
+void ChordCodeProEditor::saveFile(ExportKind kind) {
+    const bool isWav = kind == ExportKind::wav;
+    const auto name = isWav ? juce::String("WAV") : juce::String("MIDI");
+    const auto extension = isWav ? juce::String("wav") : juce::String("mid");
+    const auto stem = chordFileStem(pro.getProgression());
     auto startDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
     if (!startDir.isDirectory()) startDir = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
-    chooser = std::make_unique<juce::FileChooser>(utf("Salvar acordes MIDI"), startDir.getChildFile(stem + ".mid"), "*.mid");
+    chooser = std::make_unique<juce::FileChooser>(isWav ? utf("Salvar acordes em WAV") : utf("Salvar acordes MIDI"),
+                                                  startDir.getChildFile(stem + "." + extension), "*." + extension);
     juce::Component::SafePointer<ChordCodeProEditor> safe(this);
     chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
                          | juce::FileBrowserComponent::warnAboutOverwriting,
-        [safe](const juce::FileChooser& fc) {
+        [safe, kind, name, extension](const juce::FileChooser& fc) {
             if (safe == nullptr) return;
             const auto chosen = fc.getResult();
             if (chosen == juce::File {}) return;
-            const auto file = chosen.withFileExtension("mid");
-            const auto bytes = ccp::MidiFile::bytes(safe->pro.getProgression(), safe->pro.midiOptions());
+            const auto file = chosen.withFileExtension(extension);
+            std::vector<uint8_t> bytes;
+            if (!safe->exportBytes(kind, bytes)) {
+                safe->showMidiProblem(utf("Não deu pra salvar o ") + name, utf("O arquivo não pôde ser gerado."));
+                return;
+            }
             juce::String why;
             if (writeMidiBytes(file, bytes, why)) return;
 
             // The chosen folder refused the write (usually Windows "Controlled folder access" on
             // Documents/Desktop, or a OneDrive folder offline). Save to a safe folder and show it.
             juce::String error;
-            const auto fallback = safe->writeDragFile(error);
+            const auto fallback = safe->writeDragFile(kind, error);
             if (fallback.existsAsFile()) {
                 fallback.revealToUser();
-                safe->showMidiProblem(utf("MIDI salvo em outra pasta"),
+                safe->showMidiProblem(name + " salvo em outra pasta",
                     utf("O Windows não deixou salvar em:\n") + file.getFullPathName() + "\n(" + why + ")"
                     + utf("\n\nSalvamos aqui e abrimos a pasta:\n") + fallback.getFullPathName());
             } else {
-                safe->showMidiProblem(utf("Não deu pra salvar o MIDI"),
+                safe->showMidiProblem(utf("Não deu pra salvar o ") + name,
                     file.getFullPathName() + "\n(" + why + ")\n\n" + error.trim());
             }
         });
@@ -1137,7 +1208,8 @@ void ChordCodeProEditor::showChordChoices(int slot) {
 
 void ChordCodeProEditor::presentPanel(std::unique_ptr<juce::Component> panel, bool dismissable) {
     content.setEnabled(false);
-    overlay.present(*this, std::move(panel), dismissable, panelScale);
+    const float scale = panelScaleFor(*panel);
+    overlay.present(*this, std::move(panel), dismissable, scale);
     overlay.grabKeyboardFocus();
 }
 
@@ -1165,6 +1237,12 @@ void ChordCodeProEditor::showSettings() {
     model.checkForUpdates = [safe] { if (safe != nullptr) safe->checkForUpdates(); };
     model.changeLicense = [safe] { if (safe != nullptr) safe->showLicense(LicensePanel::Mode::change); };
     model.close = [safe] { if (safe != nullptr) safe->overlay.dismiss(); };
+    model.windowScale = [safe] { return safe != nullptr ? safe->uiScale() / defaultWindowScale : 1.0f; };
+    model.setWindowScale = [safe](float scale) {
+        if (safe == nullptr) return;
+        safe->license->setPreference(windowScaleKey, scale);
+        safe->applyWindowScale(scale);
+    };
     presentPanel(std::make_unique<SettingsPanel>(std::move(model)), true);
 }
 

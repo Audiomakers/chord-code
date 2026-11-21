@@ -310,7 +310,8 @@ double ChordCodeProProcessor::hostBpm() const {
 
 void ChordCodeProProcessor::scheduleChord(juce::MidiBuffer& m, const ccp::Chord& c, int chordIndex,
                                           int64_t chordStart, int64_t chordDuration,
-                                          int64_t blockStart, int64_t blockEnd, ccp::MidiRhythm rhythm) {
+                                          int64_t blockStart, int64_t blockEnd, ccp::MidiRhythm rhythm,
+                                          double sampleRate) {
     const int volume = juce::jlimit(0, 100, (int) *apvts.getRawParameterValue("velocity"));
     const int baseVelocity = juce::jlimit(1, 127, juce::roundToInt((float) volume * 1.27f));
     for (int i = 0; i < c.noteCount; ++i) {
@@ -318,10 +319,10 @@ void ChordCodeProProcessor::scheduleChord(juce::MidiBuffer& m, const ccp::Chord&
         int64_t offset = 0;
         int velocity = baseVelocity;
         if (rhythm == ccp::MidiRhythm::humanize) {
-            offset = (int64_t) std::llround(sr * (0.012 + 0.003 * (double) ((chordIndex * 17 + i * 23) % 11)));
+            offset = (int64_t) std::llround(sampleRate * (0.012 + 0.003 * (double) ((chordIndex * 17 + i * 23) % 11)));
             velocity = juce::jlimit(1, 127, velocity + ((chordIndex * 11 + i * 7) % 13) - 6);
         } else if (rhythm == ccp::MidiRhythm::strum) {
-            offset = (int64_t) std::llround(sr * 0.027 * (double) i);
+            offset = (int64_t) std::llround(sampleRate * 0.027 * (double) i);
         } else if (rhythm == ccp::MidiRhythm::arpeggio) {
             offset = i * juce::jmax<int64_t>(1, chordDuration / juce::jmax(1, c.noteCount));
         }
@@ -402,7 +403,7 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
         if (auditionMode) {
             const auto& auditionedChord = customAudition ? customPreviewChord : p.chords[(size_t) playing];
             scheduleChord(events, auditionedChord, playing, 0, auditionSamples,
-                          playheadSamples, blockEnd, options.rhythm);
+                          playheadSamples, blockEnd, options.rhythm, sr);
             if (blockEnd >= auditionSamples) {
                 playing = -1;
                 auditionMode = false;
@@ -413,7 +414,7 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
             const int last = juce::jlimit(0, p.chordCount - 1, (int) ((juce::jmin(blockEnd, total) - 1) / chordSamples));
             for (int i = first; i <= last; ++i) {
                 scheduleChord(events, p.chords[(size_t) i], i, (int64_t) i * chordSamples, chordSamples,
-                              playheadSamples, blockEnd, options.rhythm);
+                              playheadSamples, blockEnd, options.rhythm, sr);
             }
             if (playheadSamples < total) active.store(last);
             if (blockEnd >= total) { playing = -1; }
@@ -430,6 +431,53 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
         releaseSamples = juce::jmax<int64_t>(0, releaseSamples - b.getNumSamples());
         if (releaseSamples == 0) active.store(-1);
     }
+}
+
+bool ChordCodeProProcessor::renderWav(juce::MemoryBlock& destination) {
+    const auto p = getProgression();
+    if (p.chordCount <= 0) return false;
+    const auto options = midiOptions();
+    constexpr double rate = 44100.0;
+    constexpr int blockSize = 512;
+    const int64_t chordSamples = juce::jmax<int64_t>(1, (int64_t) std::llround(rate * 60.0 / options.bpm * options.beatsPerChord));
+    const int64_t loop = chordSamples * p.chordCount;
+
+    PreviewSynth offline;
+    offline.prepare(rate, blockSize);
+    offline.setTimbre((ccp::Timbre) (int) *apvts.getRawParameterValue("timbre"));
+    juce::AudioBuffer<float> result(2, (int) loop), chunk(2, blockSize);
+    result.clear();
+    for (int64_t position = 0; position < loop * 2; position += blockSize) {
+        const int count = (int) juce::jmin<int64_t>(blockSize, loop * 2 - position);
+        juce::MidiBuffer events;
+        for (int pass = 0; pass < 2; ++pass)
+            for (int i = 0; i < p.chordCount; ++i)
+                scheduleChord(events, p.chords[(size_t) i], i, pass * loop + i * chordSamples, chordSamples,
+                              position, position + count, options.rhythm, rate);
+        chunk.setSize(2, count, false, false, true);
+        chunk.clear();
+        offline.render(chunk, events);
+        // Keep the second pass only.
+        const int64_t from = juce::jmax(position, loop);
+        if (position + count > loop)
+            for (int c = 0; c < 2; ++c)
+                result.copyFrom(c, (int) (from - loop), chunk, c, (int) (from - position), (int) (position + count - from));
+    }
+
+    // Same level for every timbre and volume setting: peak at -1 dBFS.
+    const float peak = result.getMagnitude(0, result.getNumSamples());
+    if (!std::isfinite(peak) || peak < 1.0e-5f) return false;
+    result.applyGain(0.891f / peak);
+
+    destination.reset();
+    auto stream = std::make_unique<juce::MemoryOutputStream>(destination, false);
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::AudioFormatWriter> writer(wav.createWriterFor(stream.get(), rate, 2, 24, {}, 0));
+    if (writer == nullptr) return false;
+    stream.release();   // owned by the writer now
+    const bool written = writer->writeFromAudioSampleBuffer(result, 0, result.getNumSamples());
+    writer.reset();     // flushes the header into destination
+    return written && destination.getSize() > 44;
 }
 
 void ChordCodeProProcessor::playSequence() { command.store(1); }

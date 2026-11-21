@@ -45,6 +45,10 @@ public:
     void setKey(int);
     void rebuildForSettings();
     void randomize();
+    // Renders the progression as REPRODUZIR plays it (timbre, rhythm, duration, volume, tempo)
+    // to a 24-bit stereo 44.1 kHz WAV that loops seamlessly: the loop is rendered twice and
+    // the second pass is kept, so the last chord's release wraps onto the start.
+    bool renderWav(juce::MemoryBlock& destination);
     void playSequence();
     void stopPreview();
     void audition(int);
@@ -71,7 +75,7 @@ private:
     bool restoreProgression();
     void scheduleChord(juce::MidiBuffer&, const ccp::Chord&, int chordIndex,
                        int64_t chordStart, int64_t chordDuration,
-                       int64_t blockStart, int64_t blockEnd, ccp::MidiRhythm);
+                       int64_t blockStart, int64_t blockEnd, ccp::MidiRhythm, double sampleRate);
     void setPreviewTimbreIfNeeded();
     void setChoice(const char*, int);
 

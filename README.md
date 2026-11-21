@@ -1,4 +1,4 @@
-# Chord Code 1.2.2
+# Chord Code 1.3.0
 
 Plugin de harmonia da Audio Makers desenvolvido em C++20 e JUCE 8.
 
@@ -72,7 +72,7 @@ O build gera:
 
 - `Chord Code.vst3`;
 - `Chord Code.component`;
-- `Chord Code 1.2.2 macOS.pkg`.
+- `Chord Code 1.3.0 macOS.pkg`.
 
 ## GitHub Actions
 

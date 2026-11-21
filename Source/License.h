@@ -29,6 +29,11 @@ public:
     // Re-checks the saved license in the background, at most every few minutes.
     void revalidate(bool force = false);
 
+    // Machine-wide preferences kept in the same settings file as the license
+    // (one file per computer, shared by every Chord Code instance).
+    double getPreference(const juce::String& key, double fallback) const;
+    void setPreference(const juce::String& key, double value);
+
     static juce::String normaliseEmail(const juce::String&);
     static bool isValidEmail(const juce::String&);
 

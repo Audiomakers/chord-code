@@ -107,11 +107,17 @@ private:
     void timerCallback() override;
     void refresh();
     void selectCard(int);
-    void exportDrag();
-    void revealMidiForDrag();
-    void saveMidi();
+    enum class ExportKind { midi, wav };
+    bool exportBytes(ExportKind, std::vector<uint8_t>&);
+    void exportDrag(ExportKind);
+    void revealForDrag(ExportKind);
+    void showSaveMenu();
+    void saveFile(ExportKind);
     void showMidiProblem(const juce::String& title, const juce::String& message);
-    juce::File writeDragFile(juce::String& error);
+    juce::File writeDragFile(ExportKind, juce::String& error);
+    float uiScale() const;
+    void applyWindowScale(float scaleOfDefault);
+    float panelScaleFor(const juce::Component& panel) const;
     void showHistory();
     void showChordChoices(int);
     void showSettings();
@@ -139,8 +145,9 @@ private:
     StatusPill status;
     juce::TextButton settings, play { "REPRODUZIR" }, variation { juce::String::fromUTF8("VARIAÇÃO") },
         random { juce::String::fromUTF8("ALEATÓRIO") }, generate { "GERAR" },
-        history { juce::String::fromUTF8("HISTÓRICO") }, save { "SALVAR MIDI" };
-    MidiDragButton drag;
+        history { juce::String::fromUTF8("HISTÓRICO") }, save { "SALVAR" };
+    MidiDragButton drag, dragWav;
+    juce::ComponentBoundsConstrainer constrainer;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, 10> comboAttachments;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> velocityAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
