@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "LookAndFeel.h"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -238,6 +239,17 @@ int main(int argc, char** argv) {
             save(card, "active-card.png");
             card.setPlaying(false); card.setArmed(true);
             save(card, "armed-card.png");
+            {   // Hover explanation, as the timbre box shows it.
+                ProLookAndFeel look;
+                const juce::String text = juce::String::fromUTF8("RHODES: piano elétrico com tremolo, quente e macio (o mesmo do Melody Code). Ótimo para R&B, lo-fi, neo soul e trap melódico.");
+                const auto bounds = look.getTooltipBounds(text, { 10, 10 }, { 0, 0, 800, 400 });
+                juce::Image image(juce::Image::ARGB, bounds.getWidth() * 2, bounds.getHeight() * 2, true);
+                juce::Graphics g(image);
+                g.addTransform(juce::AffineTransform::scale(2.0f));
+                look.drawTooltip(g, text, bounds.getWidth(), bounds.getHeight());
+                juce::FileOutputStream output(folder.getChildFile("tooltip.png"));
+                require(output.openedOk() && juce::PNGImageFormat().writeImageToStream(image, output), "Tooltip snapshot failed");
+            }
             auto editor = std::unique_ptr<juce::AudioProcessorEditor>(processor.createEditor());
             save(*editor, "interface.png");
             require(editor->isResizable(), "Editor is not resizable");

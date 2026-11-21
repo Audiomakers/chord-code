@@ -245,3 +245,32 @@ void ProLookAndFeel::getIdealPopupMenuItemSize(const juce::String& text, bool se
     height = standardHeight > 0 ? juce::jmax(standardHeight, 30) : juce::roundToInt(popupFont.getHeight() * 1.35f);
     width = juce::GlyphArrangement::getStringWidthInt(popupFont, text) + height * 2;
 }
+
+// Hover explanations (same look as the Melody Code): a dark card with an orange border.
+namespace {
+juce::TextLayout tooltipLayout(const juce::String& text) {
+    juce::AttributedString a;
+    a.setJustification(juce::Justification::centredLeft);
+    a.append(text, ChordCodeTheme::font(13.5f), juce::Colour(ChordCodeTheme::textPrimary));
+    juce::TextLayout layout;
+    layout.createLayoutWithBalancedLineLengths(a, 300.0f);
+    return layout;
+}
+}
+
+juce::Rectangle<int> ProLookAndFeel::getTooltipBounds(const juce::String& text, juce::Point<int> pos, juce::Rectangle<int> parent) {
+    const auto layout = tooltipLayout(text);
+    const int w = (int) std::ceil(layout.getWidth()) + 28, h = (int) std::ceil(layout.getHeight()) + 20;
+    return juce::Rectangle<int>(pos.x > parent.getCentreX() ? pos.x - (w + 12) : pos.x + 12,
+                                pos.y > parent.getCentreY() ? pos.y - (h + 8) : pos.y + 18, w, h)
+        .constrainedWithin(parent);
+}
+
+void ProLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text, int w, int h) {
+    const auto r = juce::Rectangle<float>(0, 0, (float) w, (float) h);
+    g.setColour(juce::Colour(ChordCodeTheme::surfaceRaised));
+    g.fillRoundedRectangle(r, 8.0f);
+    g.setColour(juce::Colour(ChordCodeTheme::orange).withAlpha(0.6f));
+    g.drawRoundedRectangle(r.reduced(0.5f), 8.0f, 1.0f);
+    tooltipLayout(text).draw(g, r.reduced(14.0f, 10.0f));
+}

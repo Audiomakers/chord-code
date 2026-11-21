@@ -581,6 +581,8 @@ void ChordCardComponent::paint(juce::Graphics& g) {
         return;
     }
 
+    if (showPiano) { paintPiano(g, juce::Rectangle<float>(r.getX() + 22.0f, r.getY() + 174.0f, r.getWidth() - 44.0f, 52.0f)); return; }
+
     // Equalizer: idle bars stay calm, playback makes them dance.
     static constexpr float heights[] { 10.0f, 18.0f, 28.0f, 40.0f, 48.0f, 40.0f, 28.0f, 18.0f, 10.0f };
     constexpr int barCount = 9;
@@ -619,6 +621,58 @@ void ChordCardComponent::mouseUp(const juce::MouseEvent& e) {
     if ((selected || playing) && playArea().contains(e.position)) { if (onPlay) onPlay(); return; }
     if (onSelect) onSelect();
     if (onPlay) onPlay();
+}
+
+void ChordCardComponent::paintPiano(juce::Graphics& g, juce::Rectangle<float> area) const {
+    // At least two octaves from the C below the lowest note, enough to hold the whole chord.
+    int lowest = 127, highest = 0;
+    for (int i = 0; i < chord.noteCount; ++i) { lowest = juce::jmin(lowest, chord.notes[(size_t) i]); highest = juce::jmax(highest, chord.notes[(size_t) i]); }
+    if (chord.noteCount == 0) { lowest = 60; highest = 67; }
+    const int start = lowest - ((lowest % 12) + 12) % 12;
+    const int octaves = juce::jmax(2, (highest - start) / 12 + 1);
+    const int end = start + 12 * octaves - 1;
+    static constexpr bool black[] { false, true, false, true, false, false, true, false, true, false, true, false };
+    const auto isOn = [this](int n) { for (int i = 0; i < chord.noteCount; ++i) if (chord.notes[(size_t) i] == n) return true; return false; };
+    const float whiteWidth = area.getWidth() / (float) (7 * octaves);
+    const float alpha = available ? 1.0f : 0.35f;
+    const auto lit = [&](int n) {
+        const auto c = n == lowest ? juce::Colour(amber) : juce::Colour(orange);
+        return c.interpolatedWith(juce::Colour(orangeLight), activeLevel * 0.5f).withMultipliedAlpha(alpha);
+    };
+    juce::Path clip; clip.addRoundedRectangle(area, 5.0f);
+    juce::Graphics::ScopedSaveState state(g);
+    g.reduceClipRegion(clip);
+    int white = 0;
+    for (int n = start; n <= end; ++n) {
+        if (black[n % 12]) continue;
+        auto key = juce::Rectangle<float>(area.getX() + (float) white * whiteWidth, area.getY(), whiteWidth, area.getHeight()).reduced(0.6f, 0.0f);
+        g.setColour(isOn(n) ? lit(n) : juce::Colour(0xffc9ced6).interpolatedWith(juce::Colour(0xffe4e7ec), hoverLevel).withMultipliedAlpha(0.85f * alpha));
+        g.fillRect(key);
+        ++white;
+    }
+    white = 0;
+    for (int n = start; n <= end; ++n) {
+        if (!black[n % 12]) { ++white; continue; }
+        const float x = area.getX() + (float) white * whiteWidth - whiteWidth * 0.32f;
+        auto key = juce::Rectangle<float>(x, area.getY(), whiteWidth * 0.64f, area.getHeight() * 0.6f);
+        g.setColour(isOn(n) ? lit(n) : juce::Colour(0xff15181d).withMultipliedAlpha(alpha));
+        g.fillRoundedRectangle(key.withTrimmedTop(-3.0f), 2.0f);
+    }
+    g.setColour(juce::Colour(border));
+    g.drawRoundedRectangle(area.reduced(0.5f), 5.0f, 1.0f);
+}
+
+juce::String ChordCardComponent::getTooltip() {
+    if (!available) return {};
+    const auto p = getMouseXYRelative().toFloat();
+    if (variationArea().contains(p)) return juce::String::fromUTF8("Troca só este acorde por outro que combine com a progressão.");
+    if (lockArea().contains(p)) return juce::String::fromUTF8(locked ? "Acorde travado: GERAR e VARIAÇÃO não mexem nele. Clique para destravar."
+                                                                       : "Trava este acorde: GERAR e VARIAÇÃO passam a manter ele.");
+    if (recordArea().expanded(3.0f).contains(p))
+        return juce::String::fromUTF8(armed ? "Esperando um acorde do teclado MIDI. Clique de novo para cancelar."
+                                            : "Grava um acorde do teclado MIDI aqui: clique, toque o acorde e ele entra no lugar deste, travado.");
+    if (body().contains(p)) return juce::String::fromUTF8("Clique para ouvir. Botão direito mostra outros acordes para este lugar.");
+    return {};
 }
 
 void ChordCardComponent::mouseDown(const juce::MouseEvent& e) {
@@ -695,6 +749,15 @@ void HeaderPill::paint(juce::Graphics& g) {
     const auto ink = on ? juce::Colour(orangeLight) : juce::Colour(textSecondary);
     g.setColour(ink);
     auto glyph = juce::Rectangle<float>(r.getX() + 14.0f, r.getCentreY() - 7.0f, 22.0f, 14.0f);
+    if (icon == Icon::piano) {
+        // Keys with one pressed.
+        g.drawRoundedRectangle(glyph, 2.0f, 1.2f);
+        for (int i = 1; i < 4; ++i) g.drawVerticalLine((int) (glyph.getX() + glyph.getWidth() * (float) i / 4.0f), glyph.getY(), glyph.getBottom());
+        g.fillRect(glyph.getX() + glyph.getWidth() * 0.25f + 1.0f, glyph.getY() + 1.0f, glyph.getWidth() * 0.25f - 1.0f, glyph.getHeight() - 2.0f);
+        g.setFont(labelFont(13.0f));
+        g.drawFittedText(text, r.withTrimmedLeft(44.0f).withTrimmedRight(12.0f).toNearestInt(), juce::Justification::centredLeft, 1);
+        return;
+    }
     if (icon == Icon::keyboard) {
         g.drawRoundedRectangle(glyph, 2.0f, 1.2f);
         for (int i = 1; i < 4; ++i) g.drawVerticalLine((int) (glyph.getX() + glyph.getWidth() * (float) i / 4.0f), glyph.getY(), glyph.getBottom());
@@ -783,7 +846,7 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     key.onChange = [this] { if (!ignore) { pro.setKey(key.getSelectedItemIndex()); refresh(); } };
     for (auto* box : { &scale, &style, &mood, &complexity, &tension, &voicingParameter })
         box->onChange = [this] { if (!ignore) { pro.rebuildForSettings(); refresh(); } };
-    timbre.onChange = [this] { pro.stopPreview(); };
+    timbre.onChange = [this] { pro.stopPreview(); updateTimbreTooltip(); };
 
     content.addAndMakeVisible(cardsViewport);
     cardsViewport.setInterceptsMouseClicks(false, true);
@@ -804,6 +867,10 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     keyModePill.setMouseCursor(juce::MouseCursor::PointingHandCursor);
     beatPill.setMouseCursor(juce::MouseCursor::PointingHandCursor);
     keyModePill.onClick = [this] { showKeyModeMenu(); };
+    content.addAndMakeVisible(pianoPill);
+    pianoPill.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    pianoPill.onClick = [this] { setShowPiano(!showPiano); };
+    setShowPiano(license->getPreference("showPiano", 1.0) > 0.5);
     beatPill.onClick = [this] { showBeatMenu(); };
 
     for (auto* button : { (juce::Button*) &settings, (juce::Button*) &play, (juce::Button*) &variation,
@@ -846,6 +913,8 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     dragWav.clickAction = [this] { revealForDrag(ExportKind::wav); };
     save.onClick = [this] { showSaveMenu(); };
 
+    setTooltips();
+
     addChildComponent(overlay);
     overlay.onDismiss = [this] { content.setEnabled(true); };
     showAllChords = std::make_shared<bool>((bool) pro.apvts.state.getProperty("chordPickerAllChords", false));
@@ -865,6 +934,53 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
             [safe = juce::Component::SafePointer<ChordCodeProEditor>(this)](UpdateChecker::Result result) {
                 if (safe != nullptr && result.succeeded) safe->setUpdateAvailable(result.updateAvailable);
             });
+}
+
+void ChordCodeProEditor::updateTimbreTooltip() {
+    static const char* const descriptions[] {
+        "PIANO: piano acústico de verdade, gravado, com duas camadas de força (toque leve soa suave, forte soa mais brilhante). O timbre principal, combina com tudo.",
+        "RHODES: piano elétrico com tremolo, quente e macio (o mesmo do Melody Code). Ótimo para R&B, lo-fi, neo soul e trap melódico.",
+        "SAW: synth de onda serra com filtro que abre no ataque. Brilhante e moderno, bom para trap, EDM e pop.",
+        "ORGAN: órgão com caixa giratória (estilo Hammond). Bom para gospel, soul, house e funk.",
+        "PAD ATMOSFÉRICO: som longo e suave que segura o acorde, cria clima. Bom para intros, ambient e trap melódico.",
+        "VIOLINO: cordas segurando os acordes. Clima de cinema, emoção e drill.",
+        "FLAUTA: flauta leve e arejada. Boa para lo-fi, R&B e beats calmos."
+    };
+    const int i = juce::jlimit(0, (int) std::size(descriptions) - 1, timbre.getSelectedItemIndex());
+    timbre.setTooltip(juce::String::fromUTF8(descriptions[i]) + "\n\n" + utf("Só muda o som do preview e do WAV. O MIDI é o mesmo."));
+}
+
+void ChordCodeProEditor::setShowPiano(bool value) {
+    showPiano = value;
+    for (auto& card : cards) card.setShowPiano(value);
+    pianoPill.setState("PIANO", value);
+    license->setPreference("showPiano", value ? 1.0 : 0.0);
+}
+
+void ChordCodeProEditor::setTooltips() {
+    key.setTooltip(utf("Tom da progressão: a nota que soa como \"casa\"."));
+    scale.setTooltip(utf("Escala do tom. MAIOR soa alegre e aberto, MENOR NATURAL mais triste. As outras dão cores diferentes (DÓRICA jazzy, FRÍGIA sombria, LÍDIA sonhadora)."));
+    style.setTooltip(utf("Gênero: muda quais acordes e caminhos de progressão são escolhidos."));
+    mood.setTooltip(utf("Clima da progressão: puxa para acordes mais tristes, alegres, sombrios, épicos..."));
+    complexity.setTooltip(utf("Quantas notas cada acorde tem. SIMPLES: tríades. COLORIDO: com nona. RICO: sétimas e nonas. AUTOMÁTICO escolhe pelo estilo."));
+    tension.setTooltip(utf("Quanto a progressão sai do tom: SUAVE fica no seguro, ALTA usa acordes emprestados e mais surpresa."));
+    voicing.setTooltip(utf("Como as notas se espalham. FECHADO: juntas. ABERTO: espalhadas, soa maior. INVERTER: muda a nota de baixo."));
+    rhythm.setTooltip(utf("Como o acorde é tocado. RETO: todas juntas. HUMANIZE: pequenas variações, como uma pessoa tocando. STRUM: uma nota depois da outra, como violão. ARPEJO: notas em sequência."));
+    length.setTooltip(utf("Duração de cada acorde: 1/4, 2/4 ou um compasso inteiro (4/4)."));
+    velocity.setTooltip(utf("Força das notas no MIDI e volume do preview."));
+    play.setTooltip(utf("Toca a progressão inteira. Com uma batida de referência ligada, fica em loop até parar."));
+    variation.setTooltip(utf("Mantém o clima e muda alguns acordes (os travados ficam)."));
+    random.setTooltip(utf("Sorteia tom, escala, estilo e clima, e gera uma progressão nova."));
+    generate.setTooltip(utf("Gera uma progressão nova com as configurações escolhidas. Acordes travados ficam."));
+    history.setTooltip(utf("Volta para uma progressão anterior."));
+    drag.setTooltip(utf("Arraste para a DAW para levar o MIDI da progressão. Clique para abrir a pasta com o arquivo."));
+    dragWav.setTooltip(utf("Arraste para a DAW para levar o áudio (WAV) com o timbre escolhido. Clique para abrir a pasta com o arquivo."));
+    save.setTooltip(utf("Salva a progressão como MIDI ou WAV numa pasta que você escolher."));
+    keyModePill.setTooltip(utf("Como o teclado MIDI toca. NOTAS: normal. ACORDES DO TOM: cada tecla vira um acorde do tom. TECLAS BRANCAS: as teclas brancas tocam os acordes do tom, em qualquer tom."));
+    pianoPill.setTooltip(utf("Mostra um piano em cada acorde com as notas que ele toca (a nota mais grave em amarelo). Clique para ligar ou desligar."));
+    beatPill.setTooltip(utf("Batida de referência para ouvir os acordes com ritmo. Só toca no preview, não vai para o MIDI nem para o WAV."));
+    settings.setTooltip(utf("Configurações: tamanho da janela, licença e atualizações."));
+    updateTimbreTooltip();
 }
 
 ChordCodeProEditor::~ChordCodeProEditor() {
@@ -965,9 +1081,10 @@ void ChordCodeProEditor::resized() {
 
     const int margin = (int) ChordCardComponent::glowMargin;
     cardsViewport.setBounds(34 - margin, 332 - margin, 1288 + margin * 2, 252 + margin * 2);
-    status.setBounds(1040, 30, 405, 32);
-    beatPill.setBounds(470, 30, 226, 32);
-    keyModePill.setBounds(708, 30, 316, 32);
+    status.setBounds(1038, 30, 407, 32);
+    beatPill.setBounds(340, 30, 226, 32);
+    keyModePill.setBounds(578, 30, 316, 32);
+    pianoPill.setBounds(906, 30, 120, 32);
     layoutChordPages();
     continueCard.setBounds(1358, 332, 142, 252);
 
