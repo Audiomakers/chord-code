@@ -35,8 +35,9 @@ falha de conexão.
 
 ## Créditos
 
-O timbre Piano usa samples do Salamander Grand Piano, de Alexander Holm,
-licenciados sob CC BY 3.0.
+O timbre Piano usa o Upright Piano KW do projeto FreePats (Gonzalo e Roberto),
+em domínio público (CC0 1.0). As batidas de referência usam sons do pack
+AMKR Formula 30 da Audio Makers.
 
 ## Compilação e testes
 

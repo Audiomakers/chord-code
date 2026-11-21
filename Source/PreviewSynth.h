@@ -18,12 +18,12 @@ private:
   void set(double w,float a,float d){re=1;im=0;cr=std::cos(w);ci=std::sin(w);amp=a;decay=d;}
   float tick(){const double r=re*cr-im*ci;im=re*ci+im*cr;re=r;const float out=(float)im*amp;amp*=decay;return out;}
   void renormalise(){const double m=1.0/std::sqrt(re*re+im*im);re*=m;im*=m;}};
- float renderRhodes();float renderOrgan(float&pan);float renderSaw(float&left,float&right);
+ void renderRhodes(float&left,float&right);float renderOrgan(float&pan);float renderSaw(float&left,float&right);
  float noise(){return rng.nextFloat()*2.0f-1.0f;}
  void updateFilter();
  ccp::Timbre timbre{ccp::Timbre::electricPiano},nextTimbre{ccp::Timbre::electricPiano};
  std::array<Partial,16> partials{};int partialCount{};
- double hz{},sr{44100},phase{},age{};double sawPhase[3]{},sawInc[3]{};
+ double hz{},sr{44100},phase{},age{};double fmPhase[4]{};float rhodesEnv{},rhodesDecay{};double sawPhase[3]{},sawInc[3]{};
  float level{},velocity{},pan{},clickAmp{},clickDecay{},clickState{};
  float svfIc1[2]{},svfIc2[2]{},svfA1{},svfA2{},svfA3{},svfK{};
  int counter{};
@@ -34,8 +34,8 @@ public:
  PreviewSynth();void prepare(double,int maximumBlockSize=512);void render(juce::AudioBuffer<float>&,juce::MidiBuffer&);void allNotesOff(bool allowTailOff=true);bool isActive() const;void setTimbre(ccp::Timbre);
 private:
  static void addSample(juce::Synthesiser&,const char*,const void*,int,int);
- static void addPiano(juce::Synthesiser&);
- juce::Synthesiser procedural,piano,pad,violin,flute;
+ static void addPiano(juce::Synthesiser&,int layer);
+ juce::Synthesiser procedural,piano,pianoHard,pad,violin,flute;
  juce::AudioBuffer<float> scratch;
  juce::MidiBuffer chunkEvents;
  ccp::Timbre current{ccp::Timbre::piano};

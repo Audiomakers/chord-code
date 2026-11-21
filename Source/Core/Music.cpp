@@ -74,5 +74,5 @@ const char* moodName(Mood x){static const char*n[]{"PADRÃO","MELANCÓLICO","EMO
 const char* complexityName(Complexity x){static const char*n[]{"SIMPLES","COLORIDO","RICO","AUTOMÁTICO"};return n[(int)x];}
 const char* tensionName(Tension x){static const char*n[]{"PADRÃO","SUAVE","MÉDIA","ALTA"};return n[(int)x];}
 const char* voicingName(Voicing x){static const char*n[]{"PADRÃO","FECHADO","ABERTO","INVERTER"};return n[(int)x];}
-const char* timbreName(Timbre x){static const char*n[]{"RHODES","SAW","ORGAN","PAD ATMOSFÉRICO","VIOLINO","FLAUTA","PIANO"};return n[(int)x];}
+const char* timbreName(Timbre x){static const char*n[]{"PIANO","RHODES","SAW","ORGAN","PAD ATMOSFÉRICO","VIOLINO","FLAUTA"};return n[(int)x];}
 }

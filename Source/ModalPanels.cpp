@@ -317,7 +317,7 @@ void SettingsPanel::paint(juce::Graphics& g) {
     g.setFont(labelFont(11.0f));
     g.drawText("BY AUDIO MAKERS", 18, 548, panelWidth - 36, 16, juce::Justification::centredLeft);
     g.setFont(font(11.0f));
-    g.drawText(utf("Piano: Salamander Grand Piano, Alexander Holm (CC BY 3.0)"), 18, 564, panelWidth - 36, 16,
+    g.drawText(utf("Piano: Upright Piano KW, FreePats (CC0) · Batidas: AMKR Formula 30"), 18, 564, panelWidth - 36, 16,
                juce::Justification::centredLeft);
 }
 

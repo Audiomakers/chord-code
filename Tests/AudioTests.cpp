@@ -20,6 +20,21 @@ int main(int argc, char** argv) {
         constexpr int blockSize = 128;
         juce::AudioBuffer<float> audio(2, blockSize);
         juce::MidiBuffer midi;
+        if (argc > 1 && juce::String(argv[1]) == "levels") {
+            // RMS of a C major triad over its first second, before normalisation (to tune normalisationGain).
+            for (int timbre = 0; timbre < (int) ccp::Timbre::count; ++timbre) {
+                PreviewSynth synth; synth.prepare(44100.0, blockSize); synth.setTimbre((ccp::Timbre) timbre);
+                midi.clear();
+                for (int note : { 60, 64, 67 }) midi.addEvent(juce::MidiMessage::noteOn(1, note, (juce::uint8) 88), 0);
+                double sum = 0; int n = 0;
+                for (int block = 0; block < 44100 / blockSize; ++block) {
+                    audio.clear(); synth.render(audio, midi); midi.clear();
+                    for (int i = 0; i < blockSize; ++i) { const double x = audio.getSample(0, i); sum += x * x; ++n; }
+                }
+                std::cout << ccp::timbreName((ccp::Timbre) timbre) << " rms " << std::sqrt(sum / n) << std::endl;
+            }
+            return 0;
+        }
         for (double rate : { 44100.0, 48000.0, 96000.0 }) {
             for (int timbre = 0; timbre < (int) ccp::Timbre::count; ++timbre) {
                 std::cout << "Transition: " << rate << " Hz, timbre " << timbre << std::endl;
@@ -158,6 +173,18 @@ int main(int argc, char** argv) {
             keys.processBlock(audio, press);
             require(keys.applyPendingCapture(), "Capture not applied (chord mode)");
             require(keys.getProgression().chords[1].name == "G" && keys.isLocked(1), "Captured chord wrong or not locked");
+            // The recorded chord sits in the octave that was played, an octave apart for keys an octave apart.
+            for (int octave : { 0, 1, -1 }) {
+                keys.armCapture(1);
+                juce::MidiBuffer up;
+                up.addEvent(juce::MidiMessage::noteOn(1, 67 + 12 * octave, (juce::uint8) 100), 0);
+                keys.processBlock(audio, up);
+                require(keys.applyPendingCapture(), "Capture not applied (octave)");
+                const auto& c = keys.getProgression().chords[1];
+                require(std::abs(c.notes[0] - (67 + 12 * octave)) <= 6, "Captured chord in another octave");
+                juce::MidiBuffer upOff; upOff.addEvent(juce::MidiMessage::noteOff(1, 67 + 12 * octave), 0);
+                keys.processBlock(audio, upOff);
+            }
 
             choice(keys, "keyMode", 0);
             keys.armCapture(2);
@@ -241,7 +268,7 @@ int main(int argc, char** argv) {
                     demo.prepareToPlay(44100, blockSize);
                     choice(demo, "beat", beat);
                     choice(demo, "bpmSync", 0);
-                    choice(demo, "manualBpm", beat == 6 || beat == 2 ? 124 : beat == 1 || beat == 9 || beat == 3 ? 140 : 90);
+                    choice(demo, "manualBpm", beat == 2 ? 130 : beat == 6 ? 124 : beat == 1 || beat == 9 || beat == 3 ? 140 : 90);
                     choice(demo, "length", 2);
                     demo.playSequence();
                     const auto opts = demo.midiOptions();

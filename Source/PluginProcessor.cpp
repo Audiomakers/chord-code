@@ -451,6 +451,16 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
             if (playheadSamples < total) active.store(current);
 
             if (loop) {
+                std::array<int64_t, ccp::maxChords> bassStarts {};
+                std::array<int, ccp::maxChords> bassNotes {};
+                for (int i = 0; i < p.chordCount; ++i) {
+                    const auto& chord = p.chords[(size_t) i];
+                    int lowest = chord.notes[0];
+                    for (int n = 1; n < chord.noteCount; ++n) lowest = juce::jmin(lowest, chord.notes[(size_t) n]);
+                    bassStarts[(size_t) i] = chordStartSamples(options, i, sr);
+                    bassNotes[(size_t) i] = ((lowest % 12) + 12) % 12;
+                }
+                drums.setBassNotes(bassStarts.data(), bassNotes.data(), p.chordCount);
                 const int first = (int) juce::jmin<int64_t>(b.getNumSamples(), juce::jmax<int64_t>(0, total - playheadSamples));
                 if (first > 0) beatSegments[(size_t) beatSegmentCount++] = { 0, first, playheadSamples };
                 if (first < b.getNumSamples()) beatSegments[(size_t) beatSegmentCount++] = { first, b.getNumSamples() - first, 0 };
@@ -467,7 +477,7 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
     const float targetGain = *apvts.getRawParameterValue("previewGain") * volume;
     b.applyGainRamp(0, b.getNumSamples(), outputGain, targetGain);
     outputGain = targetGain;
-    const float beatGain = *apvts.getRawParameterValue("previewGain") * 0.5f;
+    const float beatGain = *apvts.getRawParameterValue("previewGain") * 0.4f;
     if (beatSegmentCount == 0)
         drums.render(b, 0, b.getNumSamples(), 0, beatBpm, false, beatGain);   // lets the last hits ring out
     for (int i = 0; i < beatSegmentCount; ++i)
@@ -600,6 +610,12 @@ void ChordCodeProProcessor::handleKeyboard(const juce::MidiBuffer& incoming, juc
                             for (int d = 1; d < 7; ++d)
                                 if (wrap12(key - scale[(size_t) d]) < wrap12(key - scale[(size_t) degree])) degree = d;
                         }
+                        // Record the notes exactly as they sound, in the octave that was played.
+                        const int lowest = keyboardChords[(size_t) degree][0];
+                        const int shift = 12 * (int) std::lround((double) (key - lowest) / 12.0);
+                        captureCount = 0;
+                        for (int i = 0; i < keyboardChordSizes[(size_t) degree] && i < (int) captureNotes.size(); ++i)
+                            captureNotes[(size_t) captureCount++] = juce::jlimit(0, 127, keyboardChords[(size_t) degree][(size_t) i] + shift);
                         captureDegree = degree;
                         captureReady = true;
                     } else if (captureCount < (int) captureNotes.size()) {
@@ -735,21 +751,24 @@ bool ChordCodeProProcessor::applyPendingCapture() {
     }
     auto p = getProgression();
     if (slot >= p.chordCount) return false;
-    if (degree >= 0) {
-        // Chord modes: the same chord the keyboard played, voice-led into the progression.
-        // Stored by root and quality so it stays exactly what was heard even if the
-        // progression was generated with other settings.
+    // Keep the notes exactly as they sounded (same octave and voicing), named by root and quality.
+    p.chords[(size_t) slot] = chordFromNotes(p.settings, notes);
+    if (degree >= 0 && !notes.empty()) {
+        // Chord modes: named after the key pressed (G, not G/B for an inverted voicing).
         const auto settings = settingsFromParams();
-        const auto played = ccp::HarmonyEngine::buildChord(settings, degree, keyboardKind(settings));
-        auto chord = chordFromNotes(settings, std::vector<int>(played.notes.begin(), played.notes.begin() + played.noteCount));
-        if (chord.quality < 0) chord = played;
-        chooseChord(slot, chord);
-    } else {
-        p.chords[(size_t) slot] = chordFromNotes(p.settings, notes);
-        if (p.chords[(size_t) slot].noteCount < 3) return false;
-        ++p.identity;
-        publish(p);
+        const auto rootPosition = ccp::HarmonyEngine::buildChord(settings, degree, keyboardKind(settings));
+        auto named = chordFromNotes(settings, std::vector<int>(rootPosition.notes.begin(), rootPosition.notes.begin() + rootPosition.noteCount));
+        if (named.quality >= 0) {
+            named.name = named.name.substr(0, named.name.find('/'));
+            std::sort(notes.begin(), notes.end());
+            named.noteCount = juce::jmin(5, (int) notes.size());
+            for (int i = 0; i < named.noteCount; ++i) named.notes[(size_t) i] = notes[(size_t) i];
+            p.chords[(size_t) slot] = named;
+        }
     }
+    if (p.chords[(size_t) slot].noteCount < 3) return false;
+    ++p.identity;
+    publish(p);
     locks[(size_t) slot].store(true);
     persistProgression();
     return true;
@@ -866,13 +885,23 @@ bool ChordCodeProProcessor::restoreProgression() {
 
 void ChordCodeProProcessor::getStateInformation(juce::MemoryBlock& d) {
     persistProgression();
-    if (auto xml = apvts.copyState().createXml())
+    if (auto xml = apvts.copyState().createXml()) {
+        xml->setAttribute("timbreOrder", 2);
         copyXmlToBinary(*xml, d);
+    }
 }
 
 void ChordCodeProProcessor::setStateInformation(const void* d, int n) {
     if (auto xml = getXmlFromBinary(d, n))
         if (xml->hasTagName(apvts.state.getType())) {
+            // Before 1.3 the timbre menu ended with PIANO; now it starts with it.
+            if (xml->getIntAttribute("timbreOrder", 1) < 2)
+                for (auto* param : xml->getChildWithTagNameIterator("PARAM"))
+                    if (param->getStringAttribute("id") == "timbre") {
+                        const int old = param->getIntAttribute("value");
+                        param->setAttribute("value", (old + 1) % (int) ccp::Timbre::count);
+                    }
+            xml->removeAttribute("timbreOrder");
             apvts.replaceState(juce::ValueTree::fromXml(*xml));
             if (!restoreProgression()) {
                 slots[0] = generator.generate(settingsFromParams());

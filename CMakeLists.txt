@@ -25,16 +25,13 @@ if(TARGET juce::juce_audio_utils)
    include(scripts/patch-juce-windows.cmake)
   endif()
  endif()
+ file(GLOB CCP_PIANO CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Assets/Piano/*.ogg")
+ file(GLOB CCP_DRUMS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Assets/Drums/*.wav")
  juce_add_binary_data(ChordCodeProSamples SOURCES
   Assets/Samples/violin_F4.wav
   Assets/Samples/pad_C4.wav
   Assets/Samples/flute_Fsharp4.wav
-  Assets/Samples/Piano/piano_C2.ogg Assets/Samples/Piano/piano_Ds2.ogg Assets/Samples/Piano/piano_Fs2.ogg Assets/Samples/Piano/piano_A2.ogg
-  Assets/Samples/Piano/piano_C3.ogg Assets/Samples/Piano/piano_Ds3.ogg Assets/Samples/Piano/piano_Fs3.ogg Assets/Samples/Piano/piano_A3.ogg
-  Assets/Samples/Piano/piano_C4.ogg Assets/Samples/Piano/piano_Ds4.ogg Assets/Samples/Piano/piano_Fs4.ogg Assets/Samples/Piano/piano_A4.ogg
-  Assets/Samples/Piano/piano_C5.ogg Assets/Samples/Piano/piano_Ds5.ogg Assets/Samples/Piano/piano_Fs5.ogg Assets/Samples/Piano/piano_A5.ogg
-  Assets/Samples/Piano/piano_C6.ogg Assets/Samples/Piano/piano_Ds6.ogg Assets/Samples/Piano/piano_Fs6.ogg Assets/Samples/Piano/piano_A6.ogg
-  Assets/Samples/Piano/piano_C7.ogg)
+  ${CCP_PIANO} ${CCP_DRUMS})
  set(CCP_PLUGIN_FORMATS VST3)
  if(APPLE)
   list(APPEND CCP_PLUGIN_FORMATS AU)
