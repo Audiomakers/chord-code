@@ -1,5 +1,6 @@
 #include "MidiFile.h"
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 
 namespace ccp {namespace {
@@ -9,9 +10,14 @@ std::vector<uint8_t>encode(std::vector<Event>events,const MidiOptions&){std::sor
 std::vector<int>pulseOffsets(Style style,int length){if(style==Style::house||style==Style::edm){std::vector<int>x;for(int t=0;t<length;t+=MidiFile::ppq)x.push_back(t);return x;}if(style==Style::latin||style==Style::funkBrasileiro)return{0,std::min(length-1,MidiFile::ppq+MidiFile::ppq/2),std::min(length-1,MidiFile::ppq*3)};if(style==Style::trap||style==Style::hipHop||style==Style::phonk)return{0,std::min(length-1,MidiFile::ppq*3)};return{0,std::min(length-1,MidiFile::ppq*2)};}
 bool writeBytes(const std::vector<uint8_t>&b,const std::filesystem::path&f){std::ofstream s(f,std::ios::binary);s.write((const char*)b.data(),(std::streamsize)b.size());return s.good();}
 }
+double chordLengthBeats(const MidiOptions&o,int index){
+ const bool first=index%2==0;
+ switch(o.groove){case Groove::longShort:return o.beatsPerChord*(first?1.5:0.5);case Groove::shortLong:return o.beatsPerChord*(first?0.5:1.5);default:return o.beatsPerChord;}
+}
+double chordStartBeats(const MidiOptions&o,int index){return o.beatsPerChord*(index-index%2)+(index%2?chordLengthBeats(o,index-1):0.0);}
 std::vector<uint8_t>MidiFile::bytes(const Progression&p,const MidiOptions&o){
- std::vector<Event>events;const int length=std::max(120,(int)std::lround(o.beatsPerChord*ppq));
- for(int ci=0;ci<p.chordCount;++ci){const auto&c=p.chords[(size_t)ci];const int base=ci*length;
+ std::vector<Event>events;
+ for(int ci=0;ci<p.chordCount;++ci){const auto&c=p.chords[(size_t)ci];const int base=(int)std::lround(chordStartBeats(o,ci)*ppq);const int length=std::max(120,(int)std::lround(chordLengthBeats(o,ci)*ppq));
   for(int n=0;n<c.noteCount;++n){int offset=0,velocity=o.velocity,end=length-24;
    if(o.rhythm==MidiRhythm::humanize){offset=12+((ci*47+n*71)%72);velocity+=((ci*11+n*7)%13)-6;}
    else if(o.rhythm==MidiRhythm::strum)offset=n*52;
@@ -23,6 +29,6 @@ std::vector<uint8_t>MidiFile::bytes(const Progression&p,const MidiOptions&o){
  }
  return encode(std::move(events),o);
 }
-std::vector<uint8_t>MidiFile::basslineBytes(const Progression&p,const MidiOptions&o){std::vector<Event>events;const int length=std::max(120,(int)std::lround(o.beatsPerChord*ppq));for(int ci=0;ci<p.chordCount;++ci){int note=48+p.chords[(size_t)ci].root;while(note>52)note-=12;while(note<36)note+=12;int base=ci*length;auto pulses=pulseOffsets(o.style,length);if(o.style==Style::standard||o.style==Style::cinematic||o.style==Style::rnb)pulses={0};for(size_t i=0;i<pulses.size();++i){int start=base+pulses[i],end=base+(i+1<pulses.size()?pulses[i+1]:length)-36;events.push_back({start,true,note,std::clamp(o.velocity-12,1,127)});events.push_back({std::max(start+60,end),false,note,0});}}return encode(std::move(events),o);}
+std::vector<uint8_t>MidiFile::basslineBytes(const Progression&p,const MidiOptions&o){std::vector<Event>events;for(int ci=0;ci<p.chordCount;++ci){const int length=std::max(120,(int)std::lround(chordLengthBeats(o,ci)*ppq));int note=48+p.chords[(size_t)ci].root;while(note>52)note-=12;while(note<36)note+=12;int base=(int)std::lround(chordStartBeats(o,ci)*ppq);auto pulses=pulseOffsets(o.style,length);if(o.style==Style::standard||o.style==Style::cinematic||o.style==Style::rnb)pulses={0};for(size_t i=0;i<pulses.size();++i){int start=base+pulses[i],end=base+(i+1<pulses.size()?pulses[i+1]:length)-36;events.push_back({start,true,note,std::clamp(o.velocity-12,1,127)});events.push_back({std::max(start+60,end),false,note,0});}}return encode(std::move(events),o);}
 bool MidiFile::write(const Progression&p,const std::filesystem::path&f,const MidiOptions&o){return writeBytes(bytes(p,o),f);}bool MidiFile::writeBassline(const Progression&p,const std::filesystem::path&f,const MidiOptions&o){return writeBytes(basslineBytes(p,o),f);}
 }

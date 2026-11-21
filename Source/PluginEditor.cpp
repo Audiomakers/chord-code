@@ -452,6 +452,7 @@ juce::Rectangle<float> ChordCardComponent::body() const { return getLocalBounds(
 juce::Rectangle<float> ChordCardComponent::playArea() const { auto b = body(); return { b.getRight() - 40.0f, b.getY() + 16.0f, 24.0f, 24.0f }; }
 juce::Rectangle<float> ChordCardComponent::variationArea() const { auto b = body(); return { b.getRight() - 105.0f, b.getY() + 18.0f, 22.0f, 22.0f }; }
 juce::Rectangle<float> ChordCardComponent::lockArea() const { auto b = body(); return { b.getRight() - 74.0f, b.getY() + 16.0f, 24.0f, 24.0f }; }
+juce::Rectangle<float> ChordCardComponent::recordArea() const { auto b = body(); return { b.getRight() - 138.0f, b.getY() + 17.0f, 24.0f, 24.0f }; }
 
 void ChordCardComponent::advanceAnimation() {
     const float hoverTarget = available && hover ? 1.0f : 0.0f;
@@ -474,6 +475,10 @@ void ChordCardComponent::paint(juce::Graphics& g) {
 
     if (glow > 0.01f)
         drawGlow(g, shape, juce::Colour(orange).withAlpha(0.55f * glow), 18);
+    const auto recordRed = juce::Colour(0xffff4d4d);
+    const float pulse = 0.5f + 0.5f * std::sin((float) juce::Time::getMillisecondCounter() * 0.006f);
+    if (armed)
+        drawGlow(g, shape, recordRed.withAlpha(0.35f + 0.3f * pulse), 16);
 
     const float alpha = available ? 1.0f : 0.45f;
     const auto top = juce::Colour(surfaceRaised).interpolatedWith(juce::Colour(surfaceHover), hoverLevel);
@@ -503,6 +508,11 @@ void ChordCardComponent::paint(juce::Graphics& g) {
         g.strokePath(shape, juce::PathStrokeType(1.0f));
     }
 
+    if (armed) {
+        g.setColour(recordRed.withAlpha(0.6f + 0.4f * pulse));
+        g.strokePath(shape, juce::PathStrokeType(2.0f));
+    }
+
     // Slot badge.
     auto badge = juce::Rectangle<float>(r.getX() + 16.0f, r.getY() + 16.0f, 36.0f, 24.0f);
     g.setColour(active ? juce::Colour(orange).withAlpha(0.18f) : juce::Colour(0xff1d2127).withMultipliedAlpha(alpha));
@@ -512,6 +522,16 @@ void ChordCardComponent::paint(juce::Graphics& g) {
     g.drawText(juce::String(slot + 1).paddedLeft('0', 2), badge, juce::Justification::centred);
 
     if (available) {
+        // Record: capture the next chord played on the MIDI keyboard.
+        const auto rec = recordArea();
+        if (armed) {
+            g.setColour(recordRed.withAlpha(0.18f));
+            g.fillRoundedRectangle(rec.expanded(4.0f), 7.0f);
+        }
+        g.setColour(armed ? recordRed : juce::Colour(textSecondary));
+        g.drawEllipse(rec.reduced(3.0f), 1.6f);
+        g.setColour(armed ? recordRed.withAlpha(0.6f + 0.4f * pulse) : juce::Colour(textSecondary));
+        g.fillEllipse(rec.reduced(8.0f));
         drawSvg(g, variationIcon.get(), variationArea());
         if (locked) {
             g.setColour(juce::Colour(orange).withAlpha(0.16f));
@@ -553,6 +573,14 @@ void ChordCardComponent::paint(juce::Graphics& g) {
         g.drawText(notes, row, juce::Justification::centredLeft);
     }
 
+    if (armed) {
+        g.setColour(recordRed);
+        g.setFont(labelFont(13.0f));
+        g.drawFittedText(utf("TOQUE UM ACORDE\nNO TECLADO MIDI"), r.withTrimmedTop(176.0f).withHeight(48.0f).toNearestInt(),
+                         juce::Justification::centred, 2);
+        return;
+    }
+
     // Equalizer: idle bars stay calm, playback makes them dance.
     static constexpr float heights[] { 10.0f, 18.0f, 28.0f, 40.0f, 48.0f, 40.0f, 28.0f, 18.0f, 10.0f };
     constexpr int barCount = 9;
@@ -587,6 +615,7 @@ void ChordCardComponent::mouseUp(const juce::MouseEvent& e) {
     if (!available) return;
     if (variationArea().contains(e.position)) { if (onRegenerate) onRegenerate(); return; }
     if (lockArea().contains(e.position)) { if (onLock) onLock(); return; }
+    if (recordArea().expanded(3.0f).contains(e.position)) { if (onRecord) onRecord(); return; }
     if ((selected || playing) && playArea().contains(e.position)) { if (onPlay) onPlay(); return; }
     if (onSelect) onSelect();
     if (onPlay) onPlay();
@@ -656,6 +685,38 @@ void StatusPill::paint(juce::Graphics& g) {
     g.drawFittedText(text, r.withTrimmedLeft(34.0f).withTrimmedRight(14.0f).toNearestInt(), juce::Justification::centredLeft, 1);
 }
 
+void HeaderPill::paint(juce::Graphics& g) {
+    auto r = getLocalBounds().toFloat().reduced(0.5f);
+    const bool over = isMouseOver(true);
+    g.setColour(on ? juce::Colour(orange).withAlpha(over ? 0.22f : 0.14f) : over ? juce::Colour(surfaceHover) : juce::Colour(surface));
+    g.fillRoundedRectangle(r, r.getHeight() * 0.5f);
+    g.setColour(on ? juce::Colour(orange).withAlpha(0.8f) : over ? juce::Colour(orange).withAlpha(0.6f) : juce::Colour(border));
+    g.drawRoundedRectangle(r, r.getHeight() * 0.5f, 1.0f);
+    const auto ink = on ? juce::Colour(orangeLight) : juce::Colour(textSecondary);
+    g.setColour(ink);
+    auto glyph = juce::Rectangle<float>(r.getX() + 14.0f, r.getCentreY() - 7.0f, 22.0f, 14.0f);
+    if (icon == Icon::keyboard) {
+        g.drawRoundedRectangle(glyph, 2.0f, 1.2f);
+        for (int i = 1; i < 4; ++i) g.drawVerticalLine((int) (glyph.getX() + glyph.getWidth() * (float) i / 4.0f), glyph.getY(), glyph.getBottom());
+        for (int i : { 1, 2 }) g.fillRect(glyph.getX() + glyph.getWidth() * (float) i / 4.0f - 2.0f, glyph.getY(), 4.0f, glyph.getHeight() * 0.55f);
+    } else {
+        // Drum: a shell with two sticks.
+        auto shell = glyph.withTrimmedTop(4.0f).reduced(2.0f, 0.0f);
+        g.drawEllipse(shell.withHeight(5.0f), 1.2f);
+        g.drawLine(shell.getX(), shell.getY() + 2.5f, shell.getX(), shell.getBottom(), 1.2f);
+        g.drawLine(shell.getRight(), shell.getY() + 2.5f, shell.getRight(), shell.getBottom(), 1.2f);
+        g.drawLine(shell.getX(), shell.getBottom(), shell.getRight(), shell.getBottom(), 1.2f);
+        g.drawLine(glyph.getX() + 4.0f, glyph.getY(), glyph.getCentreX(), glyph.getY() + 5.0f, 1.2f);
+        g.drawLine(glyph.getRight() - 4.0f, glyph.getY(), glyph.getCentreX(), glyph.getY() + 5.0f, 1.2f);
+    }
+    g.setFont(labelFont(13.0f));
+    g.drawFittedText(text, r.withTrimmedLeft(44.0f).withTrimmedRight(26.0f).toNearestInt(), juce::Justification::centredLeft, 1);
+    juce::Path arrow;
+    const auto c = juce::Point<float>(r.getRight() - 16.0f, r.getCentreY());
+    arrow.startNewSubPath(c.x - 4.0f, c.y - 2.0f); arrow.lineTo(c.x, c.y + 2.0f); arrow.lineTo(c.x + 4.0f, c.y - 2.0f);
+    g.strokePath(arrow, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
 ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcessorEditor(&p), pro(p) {
     setLookAndFeel(&laf);
     setOpaque(true);
@@ -683,6 +744,13 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     addNames<ccp::Voicing>(voicingParameter, ccp::voicingName);
     rhythmParameter.addItemList({ "RETO", "HUMANIZE", "STRUM", "ARPEJO" }, 1);
     length.addItemList({ "1/4", "2/4", "4/4" }, 1);
+    groove.addItemList({ "IGUAL", "LONGO-CURTO", "CURTO-LONGO" }, 1);
+    groove.setJustificationType(juce::Justification::centredLeft);
+    groove.setRepaintsOnMouseActivity(true);
+    groove.setTooltip(utf("Alterna a duração dos acordes em pares: um mais longo e outro mais curto."));
+    grooveAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "groove", groove);
+    content.addAndMakeVisible(groove);
+    groove.onChange = [this] { pro.stopPreview(); updateStatus(); };
 
     std::array<juce::ComboBox*, 10> boxes { &key, &scale, &style, &mood, &complexity, &tension, &timbre,
                                             &voicingParameter, &rhythmParameter, &length };
@@ -702,7 +770,7 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     rhythm.onSelect = [this](int i) { rhythmParameter.setSelectedItemIndex(i, juce::sendNotificationSync); };
 
     velocity.setSliderStyle(juce::Slider::LinearHorizontal);
-    velocity.setTextBoxStyle(juce::Slider::TextBoxRight, false, 88, 48);
+    velocity.setTextBoxStyle(juce::Slider::TextBoxRight, false, 48, 48);
     velocity.setRange(0, 100, 1);
     velocity.setNumDecimalPlacesToDisplay(0);
     velocity.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(surface));
@@ -727,9 +795,16 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
         cards[(size_t) i].onRegenerate = [this, i] { pro.regenerateChord(i); refresh(); };
         cards[(size_t) i].onLock = [this, i] { pro.toggleLock(i); refresh(); };
         cards[(size_t) i].onShowChordChoices = [this](int slot) { showChordChoices(slot); };
+        cards[(size_t) i].onRecord = [this, i] { pro.armCapture(i); };
     }
     content.addAndMakeVisible(continueCard);
     content.addAndMakeVisible(status);
+    content.addAndMakeVisible(keyModePill);
+    content.addAndMakeVisible(beatPill);
+    keyModePill.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    beatPill.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    keyModePill.onClick = [this] { showKeyModeMenu(); };
+    beatPill.onClick = [this] { showBeatMenu(); };
 
     for (auto* button : { (juce::Button*) &settings, (juce::Button*) &play, (juce::Button*) &variation,
                           (juce::Button*) &random, (juce::Button*) &generate, (juce::Button*) &history,
@@ -798,7 +873,8 @@ ChordCodeProEditor::~ChordCodeProEditor() {
     updateChecker.cancelAndWait();
     backgroundUpdateCheck.cancelAndWait();
     chooser.reset();
-    for (auto& card : cards) { card.onSelect = {}; card.onPlay = {}; card.onRegenerate = {}; card.onLock = {}; card.onShowChordChoices = {}; }
+    for (auto& card : cards) { card.onSelect = {}; card.onPlay = {}; card.onRegenerate = {}; card.onLock = {}; card.onShowChordChoices = {}; card.onRecord = {}; }
+    pro.armCapture(-1);
     pro.stopPreview();
     setLookAndFeel(nullptr);
 }
@@ -869,7 +945,7 @@ void ChordCodeProEditor::paint(juce::Graphics& g) {
     drawGroup({ 504.5f, 608.5f, 450.0f, 118.0f });
     drawGroup({ 964.5f, 608.5f, 536.0f, 118.0f });
     label(g, "FORMA DO ACORDE", 55, 625, 220); label(g, "RITMO", 525, 625, 180);
-    label(g, "DURAÇÃO", 981, 625, 180); label(g, "VOLUME", 1193, 625, 160);
+    label(g, "DURAÇÃO", 981, 625, 120); label(g, "ALTERNÂNCIA", 1113, 625, 200); label(g, "VOLUME", 1327, 625, 160);
 
     // Warm glow under the primary action.
     juce::Path generateShape;
@@ -890,13 +966,16 @@ void ChordCodeProEditor::resized() {
     const int margin = (int) ChordCardComponent::glowMargin;
     cardsViewport.setBounds(34 - margin, 332 - margin, 1288 + margin * 2, 252 + margin * 2);
     status.setBounds(1040, 30, 405, 32);
+    beatPill.setBounds(470, 30, 226, 32);
+    keyModePill.setBounds(708, 30, 316, 32);
     layoutChordPages();
     continueCard.setBounds(1358, 332, 142, 252);
 
     voicing.setBounds(53, 657, 416, 46);
     rhythm.setBounds(523, 657, 404, 46);
-    length.setBounds(981, 655, 188, 48);
-    velocity.setBounds(1193, 647, 274, 64);
+    length.setBounds(981, 655, 120, 48);
+    groove.setBounds(1113, 655, 202, 48);
+    velocity.setBounds(1323, 647, 166, 64);
 
     play.setBounds(34, 758, 160, 84); variation.setBounds(204, 758, 166, 84);
     random.setBounds(380, 758, 168, 84); generate.setBounds(558, 757, 240, 84);
@@ -933,7 +1012,12 @@ void ChordCodeProEditor::timerCallback() {
     animationPhase += 0.28f;
     if (animationPhase > juce::MathConstants<float>::twoPi)
         animationPhase -= juce::MathConstants<float>::twoPi;
+    if (pro.applyPendingCapture()) refresh();
+    const int armed = pro.armedSlot();
+    updatePills();
     for (int i = 0; i < 8; ++i) {
+        cards[(size_t) i].setArmed(i == armed);
+        if (i == armed) cards[(size_t) i].repaint();
         cards[(size_t) i].setPlaying(i == now);
         cards[(size_t) i].setPlaybackPhase(animationPhase);
         cards[(size_t) i].advanceAnimation();
@@ -1015,6 +1099,7 @@ void ChordCodeProEditor::refresh() {
     voicing.setSelected(voicingParameter.getSelectedItemIndex());
     rhythm.setSelected(rhythmParameter.getSelectedItemIndex());
     updateStatus();
+    updatePills();
     repaint();
 }
 
@@ -1155,6 +1240,51 @@ void ChordCodeProEditor::saveFile(ExportKind kind) {
                 safe->showMidiProblem(utf("Não deu pra salvar o ") + name,
                     file.getFullPathName() + "\n(" + why + ")\n\n" + error.trim());
             }
+        });
+}
+
+void ChordCodeProEditor::updatePills() {
+    static const char* modes[] { "TECLADO: NOTAS", "TECLADO: ACORDES DO TOM", "TECLADO: TECLAS BRANCAS" };
+    const int mode = juce::jlimit(0, 2, (int) pro.keyMode());
+    keyModePill.setState(modes[mode], mode != 0);
+    const int beat = (int) *pro.apvts.getRawParameterValue("beat");
+    beatPill.setState(juce::String("BATIDA: ") + utf(DrumMachine::patternName(beat)), beat != 0);
+}
+
+void ChordCodeProEditor::showKeyModeMenu() {
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(&laf);
+    const int current = (int) pro.keyMode();
+    menu.addSectionHeader("O QUE O TECLADO MIDI TOCA");
+    menu.addItem(1, utf("Notas (cada tecla é uma nota)"), true, current == 0);
+    menu.addItem(2, utf("Acordes do tom (a tecla vira o acorde da escala)"), true, current == 1);
+    menu.addItem(3, utf("Teclas brancas (C D E F G A B = graus I a VII)"), true, current == 2);
+    menu.addSeparator();
+    menu.addItem(10, utf("Gravar no card: clique no ● do card e toque o acorde"), false);
+    juce::Component::SafePointer<ChordCodeProEditor> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(keyModePill).withParentComponent(this),
+        [safe](int result) {
+            if (safe == nullptr || result < 1 || result > 3) return;
+            if (auto* parameter = safe->pro.apvts.getParameter("keyMode"))
+                parameter->setValueNotifyingHost(parameter->convertTo0to1((float) (result - 1)));
+        });
+}
+
+void ChordCodeProEditor::showBeatMenu() {
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(&laf);
+    const int current = (int) *pro.apvts.getRawParameterValue("beat");
+    menu.addSectionHeader(utf("BATIDA DE REFERÊNCIA (TOCA NO REPRODUZIR)"));
+    for (int i = 0; i < DrumMachine::patternCount; ++i)
+        menu.addItem(i + 1, utf(DrumMachine::patternName(i)), true, current == i);
+    menu.addSeparator();
+    menu.addItem(100, utf("Com batida, o REPRODUZIR fica em loop. Não vai no MIDI nem no WAV."), false);
+    juce::Component::SafePointer<ChordCodeProEditor> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(beatPill).withParentComponent(this),
+        [safe](int result) {
+            if (safe == nullptr || result < 1 || result > DrumMachine::patternCount) return;
+            if (auto* parameter = safe->pro.apvts.getParameter("beat"))
+                parameter->setValueNotifyingHost(parameter->convertTo0to1((float) (result - 1)));
         });
 }
 

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <set>
 
 static void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -107,6 +108,90 @@ int main(int argc, char** argv) {
         }
         choice(processor, "timbre", 0);
         choice(processor, "rhythm", 0);
+
+        // Groove: LONGO-CURTO keeps the loop length but alternates 1.5x / 0.5x.
+        {
+            auto options = processor.midiOptions();
+            options.beatsPerChord = 2.0;
+            options.groove = ccp::Groove::longShort;
+            require(std::abs(ccp::chordLengthBeats(options, 0) - 3.0) < 1e-9 && std::abs(ccp::chordLengthBeats(options, 1) - 1.0) < 1e-9, "Groove lengths");
+            require(std::abs(ccp::chordStartBeats(options, 2) - 4.0) < 1e-9 && std::abs(ccp::chordStartBeats(options, 4) - 8.0) < 1e-9, "Groove keeps the bar");
+            const auto bytes = ccp::MidiFile::bytes(processor.getProgression(), options);
+            juce::MemoryInputStream stream(bytes.data(), bytes.size(), false);
+            juce::MidiFile file;
+            require(file.readFrom(stream), "Groove MIDI invalid");
+            std::set<int> starts;
+            for (auto* event : *file.getTrack(0)) if (event->message.isNoteOn()) starts.insert((int) event->message.getTimeStamp());
+            require(starts.count(0) && starts.count(3 * 960) && starts.count(4 * 960) && starts.count(7 * 960), "Groove MIDI timing");
+        }
+
+        // Chord detection from played notes.
+        {
+            ccp::GenerationSettings s; s.key = 0; s.scale = ccp::ScaleType::major;
+            auto named = [&](std::vector<int> notes) { return ChordCodeProProcessor::chordFromNotes(s, notes).name; };
+            require(named({ 60, 64, 67 }) == "C", "detect C");
+            require(named({ 57, 60, 64 }) == "Am", "detect Am");
+            require(named({ 64, 67, 72 }) == "C/E", "detect C/E");
+            require(named({ 55, 59, 62, 65 }) == "G7", "detect G7");
+            require(named({ 62, 65, 69, 72 }) == "Dm7", "detect Dm7");
+            require(named({ 60, 64, 67, 71 }) == "Cmaj7", "detect Cmaj7");
+            require(named({ 69 }) == "Am", "single note -> scale chord");
+            require(ChordCodeProProcessor::chordFromNotes(s, { 60, 64, 67, 71, 74, 77 }).noteCount <= 5, "max five notes");
+        }
+
+        // MIDI keyboard: chord modes turn one key into a chord; capture fills and locks a slot.
+        {
+            ChordCodeProProcessor keys;
+            keys.prepareToPlay(48000, blockSize);
+            choice(keys, "key", 0); choice(keys, "scale", 0); choice(keys, "complexity", 0);
+            choice(keys, "keyMode", 1);
+            juce::MidiBuffer in;
+            in.addEvent(juce::MidiMessage::noteOn(1, 62, (juce::uint8) 100), 0);   // D -> Dm
+            audio.clear(); keys.processBlock(audio, in);
+            for (int block = 0; block < 40; ++block) { juce::MidiBuffer none; keys.processBlock(audio, none); }
+            require(audio.getMagnitude(0, blockSize) > 0.001f, "Chord mode is silent");
+
+            keys.armCapture(1);
+            require(keys.armedSlot() == 1, "Slot not armed");
+            juce::MidiBuffer press;
+            press.addEvent(juce::MidiMessage::noteOn(1, 67, (juce::uint8) 100), 0);  // G -> G
+            keys.processBlock(audio, press);
+            require(keys.applyPendingCapture(), "Capture not applied (chord mode)");
+            require(keys.getProgression().chords[1].name == "G" && keys.isLocked(1), "Captured chord wrong or not locked");
+
+            choice(keys, "keyMode", 0);
+            keys.armCapture(2);
+            juce::MidiBuffer chordOn, chordOff;
+            for (int n : { 57, 60, 64, 67 }) chordOn.addEvent(juce::MidiMessage::noteOn(1, n, (juce::uint8) 90), 0);
+            keys.processBlock(audio, chordOn);
+            require(!keys.applyPendingCapture(), "Capture finished before release");
+            for (int n : { 57, 60, 64, 67 }) chordOff.addEvent(juce::MidiMessage::noteOff(1, n), 0);
+            keys.processBlock(audio, chordOff);
+            require(keys.applyPendingCapture(), "Capture not applied (notes mode)");
+            require(keys.getProgression().chords[2].name == "Am7", "Played chord not detected as Am7");
+            require(keys.getProgression().chords[2].notes[0] == 57, "Played voicing not kept");
+            keys.armCapture(3); keys.armCapture(3);
+            require(keys.armedSlot() == -1, "Second click should disarm");
+        }
+
+        // Reference beat: every pattern makes sound, stays finite, loops the preview.
+        for (int beat = 1; beat < DrumMachine::patternCount; ++beat) {
+            ChordCodeProProcessor beatProcessor;
+            beatProcessor.prepareToPlay(48000, blockSize);
+            choice(beatProcessor, "beat", beat);
+            beatProcessor.playSequence();
+            float loudest = 0.0f;
+            const int blocks = 4 * 2 * 48000 / blockSize + 200;   // longer than one pass of the loop
+            for (int block = 0; block < blocks; ++block) {
+                beatProcessor.processBlock(audio, midi);
+                for (int i = 0; i < blockSize; ++i) require(std::isfinite(audio.getSample(0, i)), "Beat produced NaN");
+                loudest = juce::jmax(loudest, audio.getMagnitude(0, blockSize));
+            }
+            require(loudest > 0.05f && loudest < 1.5f, "Beat level");
+            require(beatProcessor.activeChord() >= 0, "Preview with beat should loop");
+            beatProcessor.stopPreview(); beatProcessor.processBlock(audio, midi);
+        }
+
         processor.toggleLock(0);
         juce::MemoryBlock state; processor.getStateInformation(state);
         ChordCodeProProcessor restored;
@@ -124,6 +209,8 @@ int main(int argc, char** argv) {
             ChordCardComponent card;
             card.setSize(310, 252); card.setChord(processor.getProgression().chords[0]); card.setPlaying(true);
             save(card, "active-card.png");
+            card.setPlaying(false); card.setArmed(true);
+            save(card, "armed-card.png");
             auto editor = std::unique_ptr<juce::AudioProcessorEditor>(processor.createEditor());
             save(*editor, "interface.png");
             require(editor->isResizable(), "Editor is not resizable");
@@ -148,6 +235,29 @@ int main(int argc, char** argv) {
                 juce::MemoryBlock wavData;
                 require(processor.renderWav(wavData), "WAV render failed");
                 folder.getChildFile("progressao.wav").replaceWithData(wavData.getData(), wavData.getSize());
+                // Preview with each reference beat, two passes of the loop.
+                for (int beat = 1; beat < DrumMachine::patternCount; ++beat) {
+                    ChordCodeProProcessor demo;
+                    demo.prepareToPlay(44100, blockSize);
+                    choice(demo, "beat", beat);
+                    choice(demo, "bpmSync", 0);
+                    choice(demo, "manualBpm", beat == 6 || beat == 2 ? 124 : beat == 1 || beat == 9 || beat == 3 ? 140 : 90);
+                    choice(demo, "length", 2);
+                    demo.playSequence();
+                    const auto opts = demo.midiOptions();
+                    const int total = (int) (44100.0 * 60.0 / opts.bpm * 16.0 * 2.0);
+                    juce::AudioBuffer<float> out(2, total);
+                    juce::MidiBuffer none;
+                    for (int pos = 0; pos + blockSize <= total; pos += blockSize) {
+                        demo.processBlock(audio, none);
+                        for (int c = 0; c < 2; ++c) out.copyFrom(c, pos, audio, c, 0, blockSize);
+                    }
+                    auto file = folder.getChildFile(juce::String("batida-") + juce::String(DrumMachine::patternName(beat)).replace(" ", "-").toLowerCase() + ".wav");
+                    file.deleteFile();
+                    juce::WavAudioFormat format;
+                    std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(file.createOutputStream().release(), 44100, 2, 16, {}, 0));
+                    if (writer) writer->writeFromAudioSampleBuffer(out, 0, total);
+                }
             }
         }
         std::cout << "Audio transitions, release highlights, 4/8 chord MIDI and state tests passed\n";

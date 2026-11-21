@@ -53,10 +53,12 @@ public:
     void setSelected(bool value) { selected = value; repaint(); }
     void setPlaying(bool value) { if (playing != value) { playing = value; repaint(); } }
     void setAvailable(bool value) { if (available != value) { available = value; repaint(); } }
+    // Waiting for a chord from the MIDI keyboard.
+    void setArmed(bool value) { if (armed != value) { armed = value; repaint(); } }
     void setPlaybackPhase(float value) { playbackPhase = value; if (playing) repaint(); }
     // Eases hover and playback highlights; called from the editor's animation timer.
     void advanceAnimation();
-    std::function<void()> onSelect, onRegenerate, onLock, onPlay;
+    std::function<void()> onSelect, onRegenerate, onLock, onPlay, onRecord;
     std::function<void(int)> onShowChordChoices;
     void paint(juce::Graphics&) override;
     bool hitTest(int x, int y) override { return body().contains((float) x, (float) y); }
@@ -69,8 +71,9 @@ private:
     juce::Rectangle<float> playArea() const;
     juce::Rectangle<float> variationArea() const;
     juce::Rectangle<float> lockArea() const;
+    juce::Rectangle<float> recordArea() const;
     int slot {}, keyRoot {};
-    bool locked {}, selected {}, playing {}, hover {}, available { true };
+    bool locked {}, selected {}, playing {}, hover {}, available { true }, armed {};
     float playbackPhase {}, hoverLevel {}, activeLevel {};
     ccp::Chord chord;
     std::unique_ptr<juce::Drawable> variationIcon, playIcon;
@@ -94,6 +97,23 @@ private:
     juce::String text;
     bool live {};
     float pulse {};
+};
+
+// Header pill with a dropdown (MIDI keyboard mode, reference beat). Orange when something is on.
+class HeaderPill final : public juce::Component {
+public:
+    enum class Icon { keyboard, drum };
+    explicit HeaderPill(Icon i) : icon(i) {}
+    void setState(const juce::String& value, bool isOn) { if (text != value || on != isOn) { text = value; on = isOn; repaint(); } }
+    std::function<void()> onClick;
+    void paint(juce::Graphics&) override;
+    void mouseEnter(const juce::MouseEvent&) override { repaint(); }
+    void mouseExit(const juce::MouseEvent&) override { repaint(); }
+    void mouseUp(const juce::MouseEvent& e) override { if (onClick && getLocalBounds().contains(e.getPosition())) onClick(); }
+private:
+    Icon icon;
+    juce::String text;
+    bool on {};
 };
 
 class ChordCodeProEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::ChangeListener {
@@ -137,7 +157,11 @@ private:
     ProLookAndFeel laf;
     juce::Component content;
     juce::Component cardsViewport;
-    juce::ComboBox key, scale, style, mood, complexity, tension, timbre, voicingParameter, rhythmParameter, length;
+    juce::ComboBox key, scale, style, mood, complexity, tension, timbre, voicingParameter, rhythmParameter, length, groove;
+    HeaderPill keyModePill { HeaderPill::Icon::keyboard }, beatPill { HeaderPill::Icon::drum };
+    void showKeyModeMenu();
+    void showBeatMenu();
+    void updatePills();
     SegmentedControl voicing, rhythm;
     juce::Slider velocity;
     std::array<ChordCardComponent, 8> cards;
@@ -150,6 +174,7 @@ private:
     juce::ComponentBoundsConstrainer constrainer;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, 10> comboAttachments;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> velocityAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> grooveAttachment;
     std::unique_ptr<juce::FileChooser> chooser;
     UpdateChecker updateChecker, backgroundUpdateCheck;
     bool updateAvailable {};

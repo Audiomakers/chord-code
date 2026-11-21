@@ -4,6 +4,7 @@
 #include "Core/MidiFile.h"
 #include "Core/Music.h"
 #include "PreviewSynth.h"
+#include "DrumMachine.h"
 
 class ChordCodeProProcessor : public juce::AudioProcessor {
 public:
@@ -57,6 +58,19 @@ public:
     void toggleLock(int);
     bool isLocked(int) const;
     bool restoreHistory(int);
+
+    // MIDI keyboard. In the chord modes each key plays a whole chord of the current key and
+    // scale: "do tom" uses the note you press (snapped to the scale), "teclas brancas" maps
+    // C D E F G A B to degrees I-VII so any key and scale can be played on white keys only.
+    enum class KeyMode { notes, scaleChords, whiteKeys, count };
+    KeyMode keyMode() const { return (KeyMode) (int) *apvts.getRawParameterValue("keyMode"); }
+    // Arms a slot: the next chord played on the MIDI keyboard replaces that slot and locks it.
+    void armCapture(int slot);
+    int armedSlot() const { return captureSlot.load(); }
+    // Called from the editor's timer; applies a finished capture. Returns true if it changed the progression.
+    bool applyPendingCapture();
+    // Exact played notes -> chord with a detected name (exposed for tests).
+    static ccp::Chord chordFromNotes(const ccp::GenerationSettings&, std::vector<int> notes);
     int historySize() const;
     juce::String historyLabel(int) const;
 
@@ -66,6 +80,7 @@ private:
         int rhythm {};
         int length {};
         int velocity { 100 };
+        int groove {};
     };
     static juce::AudioProcessorValueTreeState::ParameterLayout layout();
     ccp::GenerationSettings settingsFromParams() const;
@@ -77,6 +92,10 @@ private:
                        int64_t chordStart, int64_t chordDuration,
                        int64_t blockStart, int64_t blockEnd, ccp::MidiRhythm, double sampleRate);
     void setPreviewTimbreIfNeeded();
+    void handleKeyboard(const juce::MidiBuffer& incoming, juce::MidiBuffer& out, int numSamples);
+    void refreshKeyboardChords();
+    int64_t chordStartSamples(const ccp::MidiOptions&, int index, double rate) const;
+    int64_t chordLengthSamples(const ccp::MidiOptions&, int index, double rate) const;
     void setChoice(const char*, int);
 
     ccp::ProgressionGenerator generator;
@@ -85,6 +104,7 @@ private:
     std::vector<HistoryEntry> history;
     std::array<std::atomic<bool>, ccp::maxChords> locks {};
     PreviewSynth synth;
+    DrumMachine drums;
     double sr { 44100.0 };
     float outputGain { 0.68f };
     std::atomic<int> command { 0 }, active { -1 };
@@ -96,6 +116,21 @@ private:
     int playing { -1 };
     bool auditionMode {};
     int currentTimbre { -1 };
+
+    // Keyboard chord mode (audio thread only).
+    std::array<std::array<int, 5>, 7> keyboardChords {};
+    std::array<int, 7> keyboardChordSizes {};
+    uint64_t keyboardSettingsHash { ~0ull };
+    std::array<std::array<int, 5>, 128> heldChord {};
+    std::array<int, 128> heldChordSize {}, soundingCount {};
+    int lastKeyMode { 0 };
+
+    // Chord capture: the audio thread collects, the message thread applies.
+    std::atomic<int> captureSlot { -1 };
+    juce::SpinLock captureLock;
+    std::array<int, 16> captureNotes {};
+    int captureCount {}, captureDegree { -1 }, captureHeld {};
+    bool captureReady {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChordCodeProProcessor)
 };

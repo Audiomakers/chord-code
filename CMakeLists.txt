@@ -68,6 +68,7 @@ if(TARGET juce::juce_audio_utils)
   Source/License.cpp Source/License.h
   Source/ModalPanels.cpp Source/ModalPanels.h
   Source/PreviewSynth.cpp Source/PreviewSynth.h
+  Source/DrumMachine.cpp Source/DrumMachine.h
   Source/LookAndFeel.cpp Source/LookAndFeel.h
   Source/ChordCodeTheme.cpp Source/ChordCodeTheme.h
   Source/EmbeddedFonts.cpp Source/EmbeddedFonts.h
