@@ -19,35 +19,30 @@ void drawDivider(juce::Graphics& g, float y, float width) {
     g.fillRect(18.0f, y, width - 36.0f, 1.0f);
 }
 
+// Audio Makers UI window: radius 18, accent light at the top, a tinted badge with the subject's icon.
 void drawCard(juce::Graphics& g, juce::Rectangle<float> r) {
-    g.setGradientFill(raisedGradient(r, juce::Colour(0xff12151a), juce::Colour(surface)));
-    g.fillRoundedRectangle(r, 16.0f);
-    // Warm light along the top edge, then the outline.
-    g.setGradientFill(juce::ColourGradient(juce::Colour(orange).withAlpha(0.10f), r.getCentreX(), r.getY(),
-                                           juce::Colour(orange).withAlpha(0.0f), r.getCentreX(), r.getY() + 90.0f, false));
-    g.fillRoundedRectangle(r, 16.0f);
+    g.setColour(juce::Colour(surface));
+    g.fillRoundedRectangle(r, AMUI::Size::radiusWindow);
+    g.setGradientFill(juce::ColourGradient(juce::Colour(orange).withAlpha(0.10f), 0.0f, r.getY(),
+                                           juce::Colour(orange).withAlpha(0.0f), 0.0f, r.getY() + 96.0f, false));
+    g.fillRoundedRectangle(r, AMUI::Size::radiusWindow);
     g.setColour(juce::Colour(border));
-    g.drawRoundedRectangle(r.reduced(0.5f), 16.0f, 1.0f);
+    g.drawRoundedRectangle(r.reduced(0.5f), AMUI::Size::radiusWindow, 1.0f);
 }
 
-void drawBrandMark(juce::Graphics& g, juce::Rectangle<float> mark) {
-    g.setGradientFill(accentGradient(mark));
-    g.fillRoundedRectangle(mark, mark.getWidth() * 10.0f / 38.0f);
-    g.setColour(juce::Colour(0xff160904));
-    const float u = mark.getWidth() / 38.0f;
-    static constexpr float bars[] { 10.0f, 20.0f, 14.0f, 24.0f };
-    for (int i = 0; i < 4; ++i)
-        g.fillRoundedRectangle(mark.getX() + (8.0f + (float) i * 6.5f) * u, mark.getCentreY() - bars[i] * 0.5f * u,
-                               3.5f * u, bars[i] * u, 1.75f * u);
+void drawBrandMark(juce::Graphics& g, juce::Rectangle<float> mark, AMUI::Icon icon = AMUI::Icon::gear) {
+    const float radius = mark.getWidth() * 0.26f;
+    g.setColour(juce::Colour(orange).withAlpha(0.12f));
+    g.fillRoundedRectangle(mark, radius);
+    g.setColour(juce::Colour(orange).withAlpha(0.35f));
+    g.drawRoundedRectangle(mark.reduced(0.5f), radius, 1.0f);
+    AMUI::drawIcon(g, icon, mark.withSizeKeepingCentre(mark.getWidth() * 0.5f, mark.getWidth() * 0.5f), juce::Colour(orangeLight));
 }
 
 void drawCloseIcon(juce::Graphics& g, juce::Rectangle<float> r, bool over) {
-    g.setColour(over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
-    g.fillEllipse(r);
-    g.setColour(over ? juce::Colour(textPrimary) : juce::Colour(textSecondary));
-    const auto c = r.reduced(r.getWidth() * 0.34f);
-    g.drawLine({ c.getTopLeft(), c.getBottomRight() }, 1.6f);
-    g.drawLine({ c.getBottomLeft(), c.getTopRight() }, 1.6f);
+    if (over) { g.setColour(juce::Colour(border)); g.fillRoundedRectangle(r, 8.0f); }
+    AMUI::drawIcon(g, AMUI::Icon::close, r.withSizeKeepingCentre(16.0f, 16.0f),
+                   over ? juce::Colour(textPrimary) : juce::Colour(textSecondary));
 }
 
 void drawVersionPill(juce::Graphics& g, juce::Rectangle<float> pill) {
@@ -56,7 +51,7 @@ void drawVersionPill(juce::Graphics& g, juce::Rectangle<float> pill) {
     g.setColour(juce::Colour(orange).withAlpha(0.35f));
     g.drawRoundedRectangle(pill.reduced(0.5f), pill.getHeight() * 0.5f, 1.0f);
     g.setColour(juce::Colour(orangeLight));
-    g.setFont(font(12.5f, true));
+    g.setFont(semi(12.5));
     g.drawText("v" JucePlugin_VersionString, pill, juce::Justification::centred);
 }
 }
@@ -165,13 +160,15 @@ bool ModalOverlay::keyPressed(const juce::KeyPress& key) {
 
 void PanelButton::paintButton(juce::Graphics& g, bool over, bool down) {
     auto r = getLocalBounds().toFloat().reduced(0.5f);
-    const float radius = 10.0f;
+    const float radius = AMUI::Size::radiusControl;
     if (primary) {
+        juce::Path p; p.addRoundedRectangle(r, radius);
+        if (isEnabled()) drawGlow(g, p, juce::Colour(orange).withAlpha(over ? 0.36f : 0.22f), 14);
         g.setGradientFill(accentGradient(r));
         g.fillRoundedRectangle(r, radius);
         if (over || down) { g.setColour(juce::Colours::white.withAlpha(down ? 0.06f : 0.12f)); g.fillRoundedRectangle(r, radius); }
         if (!isEnabled()) { g.setColour(juce::Colour(surface).withAlpha(0.45f)); g.fillRoundedRectangle(r, radius); }
-        g.setColour(juce::Colour(0xff160904));
+        g.setColour(juce::Colour(0xff1a0a02));
     } else {
         g.setColour(over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
         g.fillRoundedRectangle(r, radius);
@@ -180,7 +177,7 @@ void PanelButton::paintButton(juce::Graphics& g, bool over, bool down) {
         g.drawRoundedRectangle(r, radius, 1.0f);
         g.setColour(isEnabled() ? juce::Colour(textPrimary) : juce::Colour(textSecondary));
     }
-    g.setFont(font(14.5f, true));
+    g.setFont(buttonFont(13.0f));
     g.drawText(getButtonText(), getLocalBounds(), juce::Justification::centred);
     if (showUpdateDot) drawUpdateDot(g, { 22.0f, (float) getHeight() * 0.5f });
 }
@@ -219,7 +216,7 @@ void SettingsPanel::paint(juce::Graphics& g) {
     g.setFont(labelFont(11.5f));
     g.drawText(utf("CONFIGURAÇÕES"), 62, 17, 200, 16, juce::Justification::centredLeft);
     g.setColour(juce::Colour(textPrimary));
-    g.setFont(font(19.0f, true));
+    g.setFont(font(18.0f, true));
     g.drawText("Chord Code", 62, 32, 130, 24, juce::Justification::centredLeft);
     drawVersionPill(g, { 172.0f, 34.0f, 62.0f, 22.0f });
     drawCloseIcon(g, closeArea(), isOver(closeArea()));
@@ -231,7 +228,7 @@ void SettingsPanel::paint(juce::Graphics& g) {
     g.setColour(isOver(row) ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
     g.fillRoundedRectangle(row, 10.0f);
     g.setColour(juce::Colour(textPrimary));
-    g.setFont(font(14.5f, true));
+    g.setFont(semi(14.5));
     g.drawText(utf("Sincronizar BPM"), row.withTrimmedLeft(12.0f).toNearestInt(), juce::Justification::centredLeft);
     auto track = juce::Rectangle<float>(40.0f, 22.0f).withCentre({ row.getRight() - 32.0f, row.getCentreY() });
     if (synced) g.setGradientFill(accentGradient(track)); else g.setColour(juce::Colour(0xff2a2f37));
@@ -257,7 +254,7 @@ void SettingsPanel::paint(juce::Graphics& g) {
             g.drawRoundedRectangle(chip.reduced(0.5f), 8.0f, 1.0f);
         }
         g.setColour(active ? juce::Colour(0xff160904) : synced ? juce::Colour(textSecondary) : juce::Colour(textPrimary));
-        g.setFont(font(14.5f, true));
+        g.setFont(semi(14.5));
         g.drawText(juce::String(bpmValues[i]), chip, juce::Justification::centred);
     }
     g.setColour(juce::Colour(textQuiet));
@@ -280,7 +277,7 @@ void SettingsPanel::paint(juce::Graphics& g) {
             g.drawRoundedRectangle(chip.reduced(0.5f), 8.0f, 1.0f);
         }
         g.setColour(active ? juce::Colour(0xff160904) : juce::Colour(textPrimary));
-        g.setFont(font(14.5f, true));
+        g.setFont(semi(14.5));
         g.drawText(juce::String(juce::roundToInt(windowScales[i] * 100.0f)) + "%", chip, juce::Justification::centred);
     }
     g.setColour(juce::Colour(textQuiet));
@@ -299,7 +296,7 @@ void SettingsPanel::paint(juce::Graphics& g) {
     g.fillEllipse(dot.expanded(4.0f));
     g.setColour(juce::Colour(success));
     g.fillEllipse(dot);
-    g.setFont(font(14.5f, true));
+    g.setFont(semi(14.5));
     g.drawText("Licenciado", juce::Rectangle<float>(lic.getX() + 32.0f, lic.getY() + 8.0f, 160.0f, 20.0f), juce::Justification::centredLeft);
     g.setColour(juce::Colour(textSecondary));
     g.setFont(font(12.5f));
@@ -308,7 +305,7 @@ void SettingsPanel::paint(juce::Graphics& g) {
                      juce::Justification::centredLeft, 1, 0.8f);
     const auto link = changeLink();
     g.setColour(isOver(link) ? juce::Colour(orangeLight) : juce::Colour(textSecondary));
-    g.setFont(font(12.5f, true));
+    g.setFont(semi(12.5));
     g.drawText("Trocar", link, juce::Justification::centredRight);
     drawDivider(g, 460.0f, width);
 
@@ -349,9 +346,9 @@ void UpdatePanel::setState(State s, Info i) {
     state = s;
     info = std::move(i);
     if (state == State::checking) startTimerHz(30); else stopTimer();
-    primary.setButtonText(state == State::available ? utf("Baixar atualização")
-                          : state == State::failed ? utf("Tentar de novo") : juce::String("OK"));
-    secondary.setButtonText(state == State::available ? utf("Agora não") : juce::String("Fechar"));
+    primary.setButtonText(state == State::available ? utf("BAIXAR ATUALIZAÇÃO")
+                          : state == State::failed ? utf("TENTAR DE NOVO") : juce::String("OK"));
+    secondary.setButtonText(state == State::available ? utf("AGORA NÃO") : juce::String("FECHAR"));
     primary.setVisible(state != State::checking);
     secondary.setVisible(state == State::available || state == State::failed);
 
@@ -453,7 +450,7 @@ void UpdatePanel::paint(juce::Graphics& g) {
         g.setColour(juce::Colour(surfaceRaised));
         g.fillRoundedRectangle(from, 13.0f);
         g.setColour(juce::Colour(textSecondary));
-        g.setFont(font(13.0f, true));
+        g.setFont(semi(13.0));
         g.drawText("v" + info.installed, from, juce::Justification::centred);
         g.setColour(juce::Colour(textQuiet));
         g.drawText(utf("→"), juce::Rectangle<float>(from.getRight(), y, 30.0f, 26.0f), juce::Justification::centred);
@@ -479,17 +476,17 @@ void UpdatePanel::paint(juce::Graphics& g) {
 // ---------------------------------------------------------------------------
 
 LicensePanel::LicensePanel(Mode m, juce::String currentEmail) : mode(m), email(std::move(currentEmail)) {
-    field.setFont(font(15.5f));
+    field.setFont(font(15.0f));
     field.setTextToShowWhenEmpty("seuemail@gmail.com", juce::Colour(textQuiet));
-    field.setIndents(14, 13);
+    field.setIndents(40, 12);
     field.setJustification(juce::Justification::centredLeft);
-    field.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff0a0c0f));
+    field.setColour(juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);   // the rounded box is painted by the panel
     field.setColour(juce::TextEditor::textColourId, juce::Colour(textPrimary));
     field.setColour(juce::TextEditor::highlightColourId, juce::Colour(orange).withAlpha(0.35f));
     field.setColour(juce::TextEditor::highlightedTextColourId, juce::Colour(textPrimary));
     field.setColour(juce::CaretComponent::caretColourId, juce::Colour(orangeLight));
-    field.setColour(juce::TextEditor::outlineColourId, juce::Colour(border));
-    field.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colour(orange));
+    field.setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
+    field.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
     field.setInputRestrictions(254);
     if (mode == Mode::revoked) field.setText(email, false);
     field.onReturnKey = [this] { submit(); };
@@ -500,7 +497,7 @@ LicensePanel::LicensePanel(Mode m, juce::String currentEmail) : mode(m), email(s
     cancel.setVisible(mode == Mode::change);
     activate.onClick = [this] { submit(); };
     cancel.onClick = [this] { if (onCancel) onCancel(); };
-    setSize(380, 330);
+    setSize(400, 316);
 }
 
 void LicensePanel::visibilityChanged() {
@@ -515,7 +512,7 @@ void LicensePanel::submit() {
     failed = false;
     message = utf("Verificando sua compra...");
     activate.setEnabled(false);
-    activate.setButtonText("Verificando...");
+    activate.setButtonText("VERIFICANDO...");
     field.setReadOnly(true);
     repaint();
     if (onSubmit) onSubmit(field.getText());
@@ -526,52 +523,67 @@ void LicensePanel::finish(bool ok, const juce::String& text) {
     failed = !ok;
     message = text;
     activate.setEnabled(true);
-    activate.setButtonText("Ativar");
+    activate.setButtonText("ATIVAR");
     field.setReadOnly(false);
     repaint();
 }
 
+// Same dialog as Melody Code: key badge, one field, the two buttons the same size with ATIVAR on the right.
 void LicensePanel::resized() {
-    field.setBounds(22, 166, getWidth() - 44, 46);
-    auto row = juce::Rectangle<int>(22, getHeight() - 66, getWidth() - 44, 44);
-    if (cancel.isVisible()) {
-        cancel.setBounds(row.removeFromLeft(120));
-        row.removeFromLeft(10);
-    }
-    activate.setBounds(row);
+    field.setBounds(24, 164, getWidth() - 48, AMUI::Size::field);
+    auto row = juce::Rectangle<int>(24, getHeight() - 24 - AMUI::Size::button, getWidth() - 48, AMUI::Size::button);
+    activate.setBounds(row.removeFromRight(cancel.isVisible() ? 128 : 160));
+    if (cancel.isVisible()) { row.removeFromRight(10); cancel.setBounds(row.removeFromRight(128)); }
+}
+
+void LicensePanel::mouseMove(const juce::MouseEvent& e) {
+    const bool over = mode == Mode::change && closeArea().contains(e.position);
+    if (over != closeHover) { closeHover = over; repaint(); }
+}
+void LicensePanel::mouseExit(const juce::MouseEvent&) { if (closeHover) { closeHover = false; repaint(); } }
+void LicensePanel::mouseUp(const juce::MouseEvent& e) {
+    if (mode == Mode::change && closeArea().contains(e.position) && onCancel) onCancel();
 }
 
 void LicensePanel::paint(juce::Graphics& g) {
     drawCard(g, getLocalBounds().toFloat());
-    drawBrandMark(g, { 22.0f, 22.0f, 40.0f, 40.0f });
-    g.setColour(juce::Colour(textSecondary));
-    g.setFont(labelFont(11.5f));
-    g.drawText(mode == Mode::revoked ? utf("LICENÇA DESATIVADA") : utf("LICENÇA"), 74, 22, 220, 16, juce::Justification::centredLeft);
+    drawBrandMark(g, { 24.0f, 24.0f, 40.0f, 40.0f }, AMUI::Icon::key);
+    g.setColour(mode == Mode::revoked ? juce::Colour(danger) : juce::Colour(textSecondary));
+    g.setFont(labelFont(11.0f));
+    g.drawText(mode == Mode::revoked ? utf("LICENÇA DESATIVADA") : utf("LICENÇA"), 78, 25, 240, 16, juce::Justification::centredLeft);
     g.setColour(juce::Colour(textPrimary));
-    g.setFont(font(20.0f, true));
+    g.setFont(font(18.0f, true));
     g.drawText(mode == Mode::activate ? utf("Ative o Chord Code") : mode == Mode::revoked ? utf("Seu acesso foi desativado")
                                                                                          : utf("Trocar e-mail da licença"),
-               74, 38, getWidth() - 96, 26, juce::Justification::centredLeft);
-    drawVersionPill(g, { (float) getWidth() - 84.0f, 22.0f, 62.0f, 22.0f });
+               78, 41, getWidth() - 126, 24, juce::Justification::centredLeft);
+    if (mode == Mode::change) drawCloseIcon(g, closeArea(), closeHover);
 
     juce::String text;
     if (mode == Mode::activate)
-        text = utf("Digite o e-mail usado na compra do Chord Code Pro. A verificação acontece só nesta primeira vez; depois ele funciona mesmo sem internet.");
+        text = utf("Digite o e-mail usado na compra do Chord Code.");
     else if (mode == Mode::revoked)
-        text = utf("O acesso de ") + email + utf(" não está mais ativo. Informe um e-mail com acesso ativo para continuar usando.");
+        text = utf("O acesso de ") + email + utf(" não está mais ativo. Informe um e-mail com acesso ativo.");
     else
-        text = utf("Informe outro e-mail com acesso ativo ao Chord Code Pro.");
+        text = utf("Informe outro e-mail com acesso ativo ao Chord Code.");
     g.setColour(juce::Colour(textSecondary));
     g.setFont(font(14.0f));
-    g.drawFittedText(text, 22, 80, getWidth() - 44, 58, juce::Justification::topLeft, 3, 1.0f);
+    g.drawFittedText(text, 24, 82, getWidth() - 48, 42, juce::Justification::topLeft, 2, 1.0f);
 
     g.setColour(juce::Colour(textSecondary));
     g.setFont(labelFont(11.0f));
-    g.drawText(utf("E-MAIL DA COMPRA"), 22, 146, 200, 16, juce::Justification::centredLeft);
-
-    if (message.isNotEmpty()) {
-        g.setColour(failed ? juce::Colour(danger) : juce::Colour(textSecondary));
-        g.setFont(font(13.0f));
-        g.drawFittedText(message, 22, 218, getWidth() - 44, 36, juce::Justification::topLeft, 2, 1.0f);
+    g.drawText(utf("E-MAIL DA COMPRA"), 24, 142, 240, 16, juce::Justification::centredLeft);
+    {   // the field's box: focused from the moment the panel opens
+        const auto box = field.getBounds().toFloat();
+        g.setColour(juce::Colour(orange).withAlpha(0.12f));
+        g.drawRoundedRectangle(box.expanded(2.0f), AMUI::Size::radiusControl + 2.0f, 3.0f);
+        g.setColour(juce::Colour(background));
+        g.fillRoundedRectangle(box, AMUI::Size::radiusControl);
+        g.setColour(juce::Colour(orange).withAlpha(0.8f));
+        g.drawRoundedRectangle(box.reduced(0.5f), AMUI::Size::radiusControl, 1.0f);
+        AMUI::drawIcon(g, AMUI::Icon::mail, { box.getX() + 14.0f, box.getCentreY() - 8.0f, 16.0f, 16.0f }, juce::Colour(orangeLight));
     }
+    g.setColour(message.isNotEmpty() ? (failed ? juce::Colour(danger) : juce::Colour(textSecondary)) : juce::Colour(textQuiet));
+    g.setFont(font(12.5f));
+    g.drawFittedText(message.isNotEmpty() ? message : utf("Verificação só na primeira vez; depois funciona offline."),
+                     24, 214, getWidth() - 48, 30, juce::Justification::topLeft, 2, 1.0f);
 }

@@ -1,29 +1,10 @@
 #include "LookAndFeel.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "ChordCodeTheme.h"
-#include "FigmaIcons.h"
 
 using namespace ChordCodeTheme;
 
-namespace {
-std::unique_ptr<juce::Drawable> drawableFromSvg(const char* source) {
-    if (auto xml = juce::parseXML(source)) return juce::Drawable::createFromSVG(*xml);
-    return {};
-}
-
-void drawSvg(juce::Graphics& g, juce::Drawable* drawable, juce::Rectangle<float> bounds) {
-    if (drawable != nullptr)
-        drawable->drawWithin(g, bounds, juce::RectanglePlacement::centred, 1.0f);
-}
-}
-
 ProLookAndFeel::ProLookAndFeel() {
-    settingsIcon = drawableFromSvg(FigmaIcons::settings);
-    playIcon = drawableFromSvg(FigmaIcons::play_action);
-    variationIcon = drawableFromSvg(FigmaIcons::variation_action);
-    randomIcon = drawableFromSvg(FigmaIcons::random_action);
-    dragIcon = drawableFromSvg(FigmaIcons::drag_action);
-    saveIcon = drawableFromSvg(FigmaIcons::save_action);
     setColour(juce::ResizableWindow::backgroundColourId, juce::Colour(background));
     setColour(juce::ComboBox::backgroundColourId, juce::Colour(surface));
     setColour(juce::ComboBox::textColourId, juce::Colour(textPrimary));
@@ -37,94 +18,95 @@ ProLookAndFeel::ProLookAndFeel() {
     setColour(juce::Slider::textBoxOutlineColourId, juce::Colour(border));
 }
 
+// Audio Makers UI (same rules as Melody Code, in Chord Code's design units): radius 13, one icon set,
+// SemiBold labels, a single hero button (GERAR).
+namespace {
+AMUI::Icon iconFor(const juce::String& id, const juce::String& text) {
+    if (id == "play") return text == "PARAR" ? AMUI::Icon::stop : AMUI::Icon::play;
+    if (id == "variation") return AMUI::Icon::variation;
+    if (id == "random") return AMUI::Icon::dice;
+    if (id == "generate") return AMUI::Icon::sparkle;
+    if (id == "history") return AMUI::Icon::history;
+    if (id == "drag") return AMUI::Icon::midi;
+    if (id == "dragWav") return AMUI::Icon::wav;
+    if (id == "save") return AMUI::Icon::save;
+    return AMUI::Icon::none;
+}
+}
+
 void ProLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down) {
     const auto id = b.getComponentID();
     auto r = b.getLocalBounds().toFloat().reduced(0.75f);
-    if (id == "settings") {
-        if (over || down) {
-            g.setColour(juce::Colour(surfaceHover).withAlpha(down ? 1.0f : 0.85f));
-            g.fillRoundedRectangle(r, 10.0f);
-        }
+    if (id == "prev" || id == "next") {   // ghost arrows inside a field
+        if (over || down) { g.setColour(juce::Colour(border).withAlpha(down ? 1.0f : 0.7f)); g.fillRoundedRectangle(r, 10.0f); }
         return;
     }
     if (id == "generate") {
+        juce::Path p; p.addRoundedRectangle(r, radiusControl);
+        if (b.isEnabled()) drawGlow(g, p, juce::Colour(orange).withAlpha(over ? 0.42f : 0.28f), 26);
         g.setGradientFill(accentGradient(r));
-        g.fillRoundedRectangle(r, 14.0f);
-        // Glossy top sheen.
-        g.setGradientFill(juce::ColourGradient(juce::Colours::white.withAlpha(0.28f), 0.0f, r.getY(),
-                                               juce::Colours::white.withAlpha(0.0f), 0.0f, r.getCentreY(), false));
-        g.fillRoundedRectangle(r.reduced(2.0f).withHeight(r.getHeight() * 0.5f), 12.0f);
+        g.fillPath(p);
         if (over || down) {
-            g.setColour(down ? juce::Colours::black.withAlpha(0.10f) : juce::Colours::white.withAlpha(0.10f));
-            g.fillRoundedRectangle(r, 14.0f);
+            g.setColour(down ? juce::Colours::black.withAlpha(0.14f) : juce::Colours::white.withAlpha(0.08f));
+            g.fillPath(p);
         }
-        g.setColour(juce::Colours::white.withAlpha(0.22f));
-        g.drawRoundedRectangle(r.reduced(0.5f), 14.0f, 1.0f);
         return;
     }
-    const auto top = down ? juce::Colour(surface) : over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised);
-    g.setGradientFill(raisedGradient(r, top, juce::Colour(surface)));
-    g.fillRoundedRectangle(r, 12.0f);
-    if (over) {
-        g.setGradientFill(juce::ColourGradient(juce::Colour(orange).withAlpha(0.10f), 0.0f, r.getBottom(),
-                                               juce::Colour(orange).withAlpha(0.0f), 0.0f, r.getY(), false));
-        g.fillRoundedRectangle(r, 12.0f);
-    }
-    g.setColour(over ? juce::Colour(orange).withAlpha(0.75f) : juce::Colour(border));
-    g.drawRoundedRectangle(r, 12.0f, 1.0f);
+    g.setColour(juce::Colour(down ? surface : over ? surfaceHover : surfaceRaised));
+    g.fillRoundedRectangle(r, radiusControl);
+    g.setColour(over ? juce::Colour(orange).withAlpha(0.6f) : juce::Colour(border));
+    g.drawRoundedRectangle(r, radiusControl, 1.0f);
 }
 
-void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool, bool) {
+void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool over, bool) {
     const auto id = b.getComponentID();
+    if (id == "prev" || id == "next") {
+        AMUI::drawIcon(g, id == "prev" ? AMUI::Icon::left : AMUI::Icon::right,
+                       juce::Rectangle<float>(22.0f, 22.0f).withCentre(b.getLocalBounds().toFloat().getCentre()),
+                       over ? juce::Colour(orange) : juce::Colour(textSecondary));
+        return;
+    }
     if (id == "settings") {
-        drawSvg(g, settingsIcon.get(), b.getLocalBounds().toFloat().reduced(1.0f));
+        AMUI::drawIcon(g, AMUI::Icon::gear, juce::Rectangle<float>(26.0f, 26.0f).withCentre(b.getLocalBounds().toFloat().getCentre()),
+                       over ? juce::Colour(orange) : juce::Colour(textSecondary));
         if ((bool) b.getProperties().getWithDefault("updateDot", false))
-            drawUpdateDot(g, { (float) b.getWidth() - 5.0f, 5.0f });
+            drawUpdateDot(g, { (float) b.getWidth() - 3.0f, 3.0f });
         return;
     }
     const bool primary = id == "generate";
-    const auto colour = primary ? juce::Colour(0xff160904) : juce::Colour(textPrimary);
-    g.setColour(colour);
-    g.setFont(primary ? font(26.0f, true).withExtraKerningFactor(0.14f) : labelFont(16.5f));
-    auto textArea = b.getLocalBounds().toFloat();
-    const bool icon = id == "play" || id == "variation" || id == "random" || id == "history" || id == "drag" || id == "dragWav" || id == "save";
-    if (icon) textArea = textArea.withTrimmedLeft(34.0f);
-    g.drawFittedText(b.getButtonText(), textArea.toNearestInt().reduced(8, 0), juce::Justification::centred, 1);
-    if (!icon) return;
-    auto iconArea = juce::Rectangle<float>(16.0f, ((float) b.getHeight() - 28.0f) * 0.5f, 28.0f, 28.0f);
-    if (id == "play") {
-        if (b.getButtonText() == "PARAR") {
-            g.setColour(colour);
-            g.fillRoundedRectangle(iconArea.getX() + 6.0f, iconArea.getY() + 5.0f, 5.0f, 18.0f, 1.0f);
-            g.fillRoundedRectangle(iconArea.getX() + 17.0f, iconArea.getY() + 5.0f, 5.0f, 18.0f, 1.0f);
-        } else drawSvg(g, playIcon.get(), iconArea);
-    } else if (id == "variation") drawSvg(g, variationIcon.get(), iconArea);
-    else if (id == "random") drawSvg(g, randomIcon.get(), iconArea.withSizeKeepingCentre(24.0f, 24.0f));
-    else if (id == "history") drawHistoryIcon(g, iconArea, colour);
-    else if (id == "drag" || id == "dragWav") drawSvg(g, dragIcon.get(), iconArea);
-    else if (id == "save") drawSvg(g, saveIcon.get(), iconArea);
+    const auto text = b.getButtonText();
+    const auto icon = iconFor(id, text);
+    auto f = primary ? semi(20.5f).withExtraKerningFactor(AMUI::kerningHero) : buttonFont(17.5f);
+    const float iconSize = 26.0f, gap = 10.0f;
+    const auto r = b.getLocalBounds().toFloat();
+    float tw = juce::GlyphArrangement::getStringWidth(f, text);
+    const float room = r.getWidth() - 28.0f - (icon == AMUI::Icon::none ? 0.0f : iconSize + gap);
+    if (tw > room) { f = buttonFont(16.0f); tw = juce::GlyphArrangement::getStringWidth(f, text); }
+    const auto textColour = primary ? juce::Colour(0xff1a0a02) : juce::Colour(textPrimary);
+    g.setFont(f);
+    if (icon == AMUI::Icon::none || tw > room) {
+        g.setColour(textColour);
+        g.drawFittedText(text, b.getLocalBounds().reduced(10, 0), juce::Justification::centred, 1, 0.9f);
+        return;
+    }
+    const float x0 = std::round(r.getCentreX() - (iconSize + gap + tw) * 0.5f);
+    AMUI::drawIcon(g, icon, { x0, r.getCentreY() - iconSize * 0.5f, iconSize, iconSize },
+                   primary ? textColour : over ? juce::Colour(orange) : juce::Colour(textSecondary));
+    g.setColour(textColour);
+    g.drawText(text, juce::Rectangle<float>(x0 + iconSize + gap, r.getY(), tw + 4.0f, r.getHeight()), juce::Justification::centredLeft);
 }
 
 void ProLookAndFeel::drawComboBox(juce::Graphics& g, int w, int h, bool down, int, int, int, int, juce::ComboBox& box) {
     auto r = juce::Rectangle<float>(0.75f, 0.75f, (float) w - 1.5f, (float) h - 1.5f);
     const bool over = box.isMouseOver(true);
     const bool open = box.isPopupActive() || down;
-    g.setGradientFill(raisedGradient(r, juce::Colour(over ? surfaceHover : surfaceRaised), juce::Colour(surface)));
+    g.setColour(juce::Colour(over ? surfaceHover : surfaceRaised));
     g.fillRoundedRectangle(r, radiusControl);
     g.setColour(open ? juce::Colour(orange) : over ? juce::Colour(orange).withAlpha(0.6f) : juce::Colour(border));
-    g.drawRoundedRectangle(r, radiusControl, open ? 1.4f : 1.0f);
-
-    auto chip = juce::Rectangle<float>((float) w - 42.0f, ((float) h - 30.0f) * 0.5f, 30.0f, 30.0f);
-    g.setColour(open || over ? juce::Colour(orange).withAlpha(0.16f) : juce::Colour(0xff1d2127));
-    g.fillRoundedRectangle(chip, 8.0f);
-    g.setColour(open || over ? juce::Colour(orangeLight) : juce::Colour(textSecondary));
-    const auto c = chip.getCentre();
-    juce::Path arrow;
-    const float dir = open ? -1.0f : 1.0f;
-    arrow.startNewSubPath(c.x - 6.0f, c.y - 3.0f * dir);
-    arrow.lineTo(c.x, c.y + 3.0f * dir);
-    arrow.lineTo(c.x + 6.0f, c.y - 3.0f * dir);
-    g.strokePath(arrow, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.drawRoundedRectangle(r, radiusControl, 1.0f);
+    const float s = 22.0f;
+    AMUI::drawIcon(g, AMUI::Icon::chevron, { (float) w - 18.0f - s, ((float) h - s) * 0.5f, s, s },
+                   open || over ? juce::Colour(orange) : juce::Colour(textSecondary));
 }
 
 void ProLookAndFeel::positionComboBoxText(juce::ComboBox& box, juce::Label& label) {
@@ -139,23 +121,20 @@ void ProLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int w, in
     const float left = (float) x + 10.0f;
     const float right = (float) x + (float) w - 10.0f;
     pos = juce::jlimit(left, right, pos);
-    auto track = juce::Rectangle<float>(left, trackY - 3.0f, right - left, 6.0f);
-    g.setColour(juce::Colour(0xff1f232a));
-    g.fillRoundedRectangle(track, 3.0f);
-    auto filled = track.withWidth(juce::jmax(6.0f, pos - left));
+    auto track = juce::Rectangle<float>(left, trackY - 2.5f, right - left, 5.0f);
+    g.setColour(juce::Colour(borderStrong));
+    g.fillRoundedRectangle(track, 2.5f);
+    auto filled = track.withWidth(juce::jmax(5.0f, pos - left));
     g.setGradientFill(juce::ColourGradient(juce::Colour(orange), left, trackY, juce::Colour(amber), right, trackY, false));
-    g.fillRoundedRectangle(filled, 3.0f);
+    g.fillRoundedRectangle(filled, 2.5f);
 
+    // same thumb as Melody Code: white dot with a soft accent ring
     const bool over = slider.isMouseOverOrDragging();
-    const float knob = over ? 24.0f : 22.0f;
-    auto thumb = juce::Rectangle<float>(knob, knob).withCentre({ pos, trackY });
-    juce::Path thumbPath;
-    thumbPath.addEllipse(thumb);
-    drawGlow(g, thumbPath, juce::Colour(orange).withAlpha(over ? 0.75f : 0.5f), 14);
+    const float knob = 22.0f;
+    g.setColour(juce::Colour(orange).withAlpha(over ? 0.45f : 0.32f));
+    g.fillEllipse(juce::Rectangle<float>(knob + 8.0f, knob + 8.0f).withCentre({ pos, trackY }));
     g.setColour(juce::Colour(textPrimary));
-    g.fillEllipse(thumb);
-    g.setColour(juce::Colour(orange));
-    g.fillEllipse(thumb.reduced(knob * 0.30f));
+    g.fillEllipse(juce::Rectangle<float>(knob, knob).withCentre({ pos, trackY }));
 }
 
 void ProLookAndFeel::drawLabel(juce::Graphics& g, juce::Label& l) {
@@ -194,7 +173,7 @@ void ProLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<
         : highlighted ? juce::Colour(orangeLight)
         : (textColour != nullptr ? *textColour : juce::Colour(textPrimary));
     g.setColour(colour);
-    g.setFont(font(15.0f, true));
+    g.setFont(semi(15.0));
     auto textArea = area.reduced(14, 0);
     if (ticked) {
         g.setColour(juce::Colour(orange));
@@ -235,8 +214,8 @@ juce::PopupMenu::Options ProLookAndFeel::getOptionsForComboBoxPopupMenu(juce::Co
     return options;
 }
 
-juce::Font ProLookAndFeel::getComboBoxFont(juce::ComboBox&) { return font(22.0f, true); }
-juce::Font ProLookAndFeel::getPopupMenuFont() { return font(16.0f); }
+juce::Font ProLookAndFeel::getComboBoxFont(juce::ComboBox&) { return semi(20.5f); }
+juce::Font ProLookAndFeel::getPopupMenuFont() { return semi(15.0f); }
 
 void ProLookAndFeel::getIdealPopupMenuItemSize(const juce::String& text, bool separator,
                                                int standardHeight, int& width, int& height) {
@@ -270,7 +249,7 @@ void ProLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text, in
     const auto r = juce::Rectangle<float>(0, 0, (float) w, (float) h);
     g.setColour(juce::Colour(ChordCodeTheme::surfaceRaised));
     g.fillRoundedRectangle(r, 8.0f);
-    g.setColour(juce::Colour(ChordCodeTheme::orange).withAlpha(0.6f));
+    g.setColour(juce::Colour(ChordCodeTheme::borderStrong));
     g.drawRoundedRectangle(r.reduced(0.5f), 8.0f, 1.0f);
     tooltipLayout(text).draw(g, r.reduced(14.0f, 10.0f));
 }

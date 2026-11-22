@@ -80,7 +80,6 @@ private:
     void paintPiano(juce::Graphics&, juce::Rectangle<float>) const;
     float playbackPhase {}, hoverLevel {}, activeLevel {};
     ccp::Chord chord;
-    std::unique_ptr<juce::Drawable> variationIcon, playIcon;
 };
 
 class ContinueCard final : public juce::Button {
@@ -173,7 +172,8 @@ private:
     std::array<ChordCardComponent, 8> cards;
     ContinueCard continueCard;
     StatusPill status;
-    juce::TextButton settings, play { "REPRODUZIR" }, variation { juce::String::fromUTF8("VARIAÇÃO") },
+    juce::TextButton timbrePrev, timbreNext;   // step through the timbres, inside the TIMBRE field
+    juce::TextButton settings, play { "OUVIR" }, variation { juce::String::fromUTF8("VARIAÇÃO") },
         random { juce::String::fromUTF8("ALEATÓRIO") }, generate { "GERAR" },
         history { juce::String::fromUTF8("HISTÓRICO") }, save { "SALVAR" };
     MidiDragButton drag, dragWav;

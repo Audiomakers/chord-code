@@ -52,6 +52,9 @@ public:
     bool renderWav(juce::MemoryBlock& destination);
     void playSequence();
     void stopPreview();
+    // REPRODUZIR loops until PARAR; anything that changes the chords starts it again from the first chord.
+    bool isSequencePlaying() const { return sequenceRunning.load(); }
+    void restartIfPlaying() { if (sequenceRunning.load()) playSequence(); }
     void audition(int);
     int activeChord() const { return active.load(); }
     double hostBpm() const;
@@ -108,6 +111,7 @@ private:
     double sr { 44100.0 };
     float outputGain { 0.68f };
     std::atomic<int> command { 0 }, active { -1 };
+    std::atomic<bool> sequenceRunning { false };
     std::atomic<int> previewDegree { 0 }, previewKind { 0 }, previewRoot { 0 }, previewQuality { -1 };
     ccp::Chord customPreviewChord;
     bool customAudition {};

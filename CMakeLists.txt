@@ -68,8 +68,8 @@ if(TARGET juce::juce_audio_utils)
   Source/DrumMachine.cpp Source/DrumMachine.h
   Source/LookAndFeel.cpp Source/LookAndFeel.h
   Source/ChordCodeTheme.cpp Source/ChordCodeTheme.h
-  Source/EmbeddedFonts.cpp Source/EmbeddedFonts.h
-  Source/FigmaIcons.h)
+  Source/EmbeddedFonts.cpp Source/EmbeddedFonts.h Source/AMUI.cpp Source/AMUI.h
+)
  target_link_libraries(ChordCodePro PRIVATE chordcode_pro_core ChordCodeProSamples juce::juce_audio_utils juce::juce_audio_processors juce::juce_audio_formats juce::juce_gui_basics PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
  target_compile_definitions(ChordCodePro PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_DIRECT2D=0 JUCE_VST3_CAN_REPLACE_VST2=0)
  if(MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang"))

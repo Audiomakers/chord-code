@@ -23,7 +23,4 @@ public:
     int getPopupMenuBorderSize() override { return 1; }
     juce::Rectangle<int> getTooltipBounds(const juce::String&, juce::Point<int>, juce::Rectangle<int>) override;
     void drawTooltip(juce::Graphics&, const juce::String&, int, int) override;
-private:
-    std::unique_ptr<juce::Drawable> settingsIcon, playIcon, variationIcon, randomIcon,
-        historyIcon, dragIcon, saveIcon;
 };
