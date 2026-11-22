@@ -47,6 +47,7 @@ public:
     void allNotesOff();             // short fade, no click
     void render(float* left, float* right, int numSamples);
     int activeVoices() const;
+    float takeMinLimiterGain() { const float g = minLimiterGain; minLimiterGain = 1.0f; return g; }   // tests: deepest limiting since last call
 
 private:
     enum Stage { attack, decay, release, kill };
@@ -100,7 +101,7 @@ private:
     float toneL[2] {}, toneH[2] {}, hpPrev[2] {};
     double wowPhase {}, flutterPhase {};
     float crushHold[2] {}; int crushCount {};
-    float limiterEnv {};
+    float limiterEnv {}, minLimiterGain { 1.0f };
     double delaySamplesNow { 1000.0 };
     void updateReverb();
 };

@@ -290,6 +290,8 @@ const Sets::Kit& Sets::kit(int k) { return kits[k < 0 || k >= kitCount ? 0 : k];
 
 void Sets::prepare(double rate) {
     sr = rate;
+    polyDown = 1.0f - std::exp(-1.0f / (0.002f * (float) rate));   // turning down: fast, before the attack piles up
+    polyK = 1.0f - std::exp(-1.0f / (0.15f * (float) rate));       // coming back up: slow
     pianoZones();   // decode the piano now, not on the first note
     for (auto& v : voices) { v.active = false; v.ks.assign((size_t) (sr / 20.0) + 4, 0.0f); }
 }
@@ -306,6 +308,7 @@ int Sets::activeVoices() const {
 
 void Sets::noteOn(int pitch, int velocity, int lengthSamples, int layer) {
     layer = juce::jlimit(0, 2, layer);
+    polyCountdown = 0;   // recount the held chord notes on the next sample
     const auto& K = kitPatches(kitIndex);
     const P& p = layer == 2 && chordPatch ? *chordPatch : auditionPatch[layer] ? *auditionPatch[layer] : *(layer == 1 ? K.bass : layer == 2 ? K.chords : K.melody);
     // the whole line moves by octaves toward the patch's centre, then single notes fold into its range
@@ -546,9 +549,23 @@ void Sets::renderVoice(Voice& v, float& outL, float& outR) {
 }
 
 void Sets::render(float& l, float& r, float& dryL, float& dryR) {
+    // Big chords (MUITO RICO has up to 10 notes) would pile up into the limiter and the saturation in the
+    // effects: the chord layer is turned down by the number of held notes, 4 notes = unity, smoothed.
+    if (--polyCountdown <= 0) {
+        polyCountdown = 16;
+        std::array<bool, 128> held {};
+        int n = 0;
+        for (const auto& v : voices)
+            if (v.active && !v.releasing && v.layer == 2 && v.pitch >= 0 && v.pitch < 128 && !held[(size_t) v.pitch]) { held[(size_t) v.pitch] = true; ++n; }
+        if (n > 0) polyTarget = n > 4 ? std::pow(4.0f / (float) n, 0.6f) : 1.0f;
+    }
+    polyGain += (polyTarget - polyGain) * (polyTarget < polyGain ? polyDown : polyK);
+    float cl = 0.0f, cr = 0.0f;
     for (auto& v : voices) {
         if (!v.active) continue;
         if (v.layer == 1) renderVoice(v, dryL, dryR);
+        else if (v.layer == 2) renderVoice(v, cl, cr);
         else renderVoice(v, l, r);
     }
+    l += cl * polyGain; r += cr * polyGain;
 }

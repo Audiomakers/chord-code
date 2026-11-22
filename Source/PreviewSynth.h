@@ -16,6 +16,7 @@ public:
     bool isActive() const;
     void setTimbre(ccp::Timbre);
     void setTempo(double bpm) { synth.setTempo(bpm); }
+    float takeMinLimiterGain() { return synth.takeMinLimiterGain(); }
 private:
     Synth synth;
     double sr { 44100.0 };

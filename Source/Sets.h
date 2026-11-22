@@ -65,4 +65,5 @@ private:
     std::array<int, 3> centers {};
     int panFlip {};
     const Patch* chordPatch {}; float chordDb {};
+    float polyGain { 1.0f }, polyTarget { 1.0f }, polyK { 0.0002f }, polyDown { 0.01f }; int polyCountdown {};
 };

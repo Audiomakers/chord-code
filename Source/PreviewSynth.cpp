@@ -9,28 +9,29 @@ Synth::Fx fx(float rev, float time, float chorus = 0, float delay = 0, float lp 
     return f;
 }
 struct TimbrePatch { const char* patch; float gainDb; Synth::Fx effects; };
-// Same order as ccp::Timbre. Gains measured so every timbre plays a chord at about the same loudness.
+// Same order as ccp::Timbre. Gains measured (AudioTests loudness) so every timbre plays generated progressions
+// at about -19 dB RMS at full volume, and percussive attacks hit the -1 dBFS limiter by 2.5 dB at most.
 const TimbrePatch& timbrePatch(ccp::Timbre t) {
     static const TimbrePatch table[] {
-        { "piano_chords",      4.0f, fx(0.20f, 1.6f) },
-        { "piano_cinema",      3.4f, fx(0.38f, 3.2f, 0.1f, 0.0f, 9000, 30, 0, 0, 0.1f, 0.3f, 30) },
-        { "piano_lofi_chords", 6.1f, fx(0.22f, 1.8f, 0.1f, 0.08f, 4200, 140, 0.3f, 0.7f, 0, 0.6f, 12, 0.5f, 0.3f) },
-        { "rhodes",            3.3f, fx(0.22f, 1.8f, 0.35f, 0.06f, 9000) },
-        { "rhodes_suitcase",   3.7f, fx(0.2f, 1.6f, 0.2f, 0.08f, 7500, 40, 0.15f) },
-        { "wurli_chords",      2.4f, fx(0.2f, 1.4f, 0.25f, 0.06f, 8000, 40, 0.2f) },
-        { "fm_ep_80s",         4.2f, fx(0.28f, 2.2f, 0.65f, 0.1f, 11000) },
-        { "vibes_chords",      5.6f, fx(0.32f, 2.4f, 0.1f, 0.05f, 10000) },
-        { "m1_organ",          8.0f, fx(0.18f, 1.4f, 0.1f, 0.15f, 10000, 50) },
-        { "church_organ",     -2.6f, fx(0.48f, 5.0f, 0.1f, 0.0f, 9000, 30, 0, 0, 0, 0.3f, 40) },
-        { "strings_ens",      -0.6f, fx(0.42f, 3.5f, 0.15f, 0.0f, 10000, 40, 0, 0, 0, 0.35f, 30) },
-        { "orchestra",        -2.0f, fx(0.45f, 3.8f, 0.1f, 0.0f, 10000, 40, 0, 0, 0, 0.35f, 35) },
-        { "brass_section",    -2.3f, fx(0.28f, 2.2f, 0.1f, 0.0f, 10000, 50, 0.1f) },
-        { "dark_pad_body",    -2.4f, fx(0.38f, 3.5f, 0.25f, 0.14f, 2800, 40, 0.3f, 0, 0, 0.7f, 20, 1.0f, 0.35f) },
-        { "juno_pad_wide",    -2.2f, fx(0.32f, 2.8f, 0.85f, 0.1f, 9000) },
-        { "atmos_pad",        -0.7f, fx(0.55f, 6.5f, 0.35f, 0.3f, 8000, 60, 0, 0, 0.2f, 0.35f, 45, 0.75f, 0.5f) },
-        { "synthwave_poly",    1.2f, fx(0.35f, 2.8f, 0.6f, 0.18f, 9000, 40, 0, 0, 0, 0.4f, 20, 0.75f, 0.4f) },
-        { "supersaw_big",      2.3f, fx(0.35f, 3.0f, 0.1f, 0.2f, 12000, 80, 0, 0, 0, 0.35f, 20, 0.75f, 0.4f) },
-        { "saw_stab_fat",      8.0f, fx(0.28f, 2.0f, 0.1f, 0.25f, 12000, 80, 0.1f, 0, 0, 0.4f, 10, 0.75f, 0.4f) },
+        { "piano_chords",      1.5f, fx(0.20f, 1.6f) },
+        { "piano_cinema",      0.2f, fx(0.38f, 3.2f, 0.1f, 0.0f, 9000, 30, 0, 0, 0.1f, 0.3f, 30) },
+        { "piano_lofi_chords", 3.4f, fx(0.22f, 1.8f, 0.1f, 0.08f, 4200, 140, 0.3f, 0.7f, 0, 0.6f, 12, 0.5f, 0.3f) },
+        { "rhodes",            1.9f, fx(0.22f, 1.8f, 0.35f, 0.06f, 9000) },
+        { "rhodes_suitcase",   1.7f, fx(0.2f, 1.6f, 0.2f, 0.08f, 7500, 40, 0.15f) },
+        { "wurli_chords",      -0.3f, fx(0.2f, 1.4f, 0.25f, 0.06f, 8000, 40, 0.2f) },
+        { "fm_ep_80s",         2.6f, fx(0.28f, 2.2f, 0.65f, 0.1f, 11000) },
+        { "vibes_chords",      4.5f, fx(0.32f, 2.4f, 0.1f, 0.05f, 10000) },
+        { "m1_organ",          5.8f, fx(0.18f, 1.4f, 0.1f, 0.15f, 10000, 50) },
+        { "church_organ",     -4.1f, fx(0.48f, 5.0f, 0.1f, 0.0f, 9000, 30, 0, 0, 0, 0.3f, 40) },
+        { "strings_ens",      1.6f, fx(0.42f, 3.5f, 0.15f, 0.0f, 10000, 40, 0, 0, 0, 0.35f, 30) },
+        { "orchestra",        -2.6f, fx(0.45f, 3.8f, 0.1f, 0.0f, 10000, 40, 0, 0, 0, 0.35f, 35) },
+        { "brass_section",    -3.2f, fx(0.28f, 2.2f, 0.1f, 0.0f, 10000, 50, 0.1f) },
+        { "dark_pad_body",    -2.1f, fx(0.38f, 3.5f, 0.25f, 0.14f, 2800, 40, 0.3f, 0, 0, 0.7f, 20, 1.0f, 0.35f) },
+        { "juno_pad_wide",    -3.8f, fx(0.32f, 2.8f, 0.85f, 0.1f, 9000) },
+        { "atmos_pad",        0.1f, fx(0.55f, 6.5f, 0.35f, 0.3f, 8000, 60, 0, 0, 0.2f, 0.35f, 45, 0.75f, 0.5f) },
+        { "synthwave_poly",    -1.0f, fx(0.35f, 2.8f, 0.6f, 0.18f, 9000, 40, 0, 0, 0, 0.4f, 20, 0.75f, 0.4f) },
+        { "supersaw_big",      2.1f, fx(0.35f, 3.0f, 0.1f, 0.2f, 12000, 80, 0, 0, 0, 0.35f, 20, 0.75f, 0.4f) },
+        { "saw_stab_fat",      6.3f, fx(0.28f, 2.0f, 0.1f, 0.25f, 12000, 80, 0.1f, 0, 0, 0.4f, 10, 0.75f, 0.4f) },
     };
     static_assert(std::size(table) == (size_t) ccp::Timbre::count, "one patch per timbre");
     return table[(size_t) juce::jlimit(0, (int) ccp::Timbre::count - 1, (int) t)];

@@ -535,6 +535,7 @@ void Synth::render(float* left, float* right, int n) {
         const float peak = std::max(std::abs(l), std::abs(r));
         limiterEnv = peak > limiterEnv ? peak : limiterEnv * rel + peak * (1.0f - rel);
         const float gain = limiterEnv > 0.89f ? 0.89f / limiterEnv : 1.0f;
+        minLimiterGain = std::min(minLimiterGain, gain);
         left[i] = l * gain;
         right[i] = r * gain;
     }

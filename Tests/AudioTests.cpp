@@ -21,6 +21,38 @@ int main(int argc, char** argv) {
         constexpr int blockSize = 128;
         juce::AudioBuffer<float> audio(2, blockSize);
         juce::MidiBuffer midi;
+        if (argc > 1 && juce::String(argv[1]) == "loudness") {
+            // per timbre and complexity: RMS (dB) of generated progressions and the deepest limiter gain reduction
+            ChordCodeProProcessor processor;
+            processor.prepareToPlay(44100.0, blockSize);
+            for (int timbre = 0; timbre < (int) ccp::Timbre::count; ++timbre) {
+                std::cout << ccp::timbreName((ccp::Timbre) timbre);
+                for (int complexity = 0; complexity < 4; ++complexity) {
+                    choice(processor, "complexity", complexity);
+                    double sum = 0; long n = 0; float worst = 1.0f;
+                    for (int round = 0; round < 6; ++round) {
+                        processor.generate();
+                        const auto prog = processor.getProgression();
+                        PreviewSynth synth; synth.prepare(44100.0, blockSize); synth.setTimbre((ccp::Timbre) timbre);
+                        midi.clear();
+                        for (int c = 0; c < prog.chordCount; ++c) {
+                            const auto& chord = prog.chords[(size_t) c];
+                            for (int k = 0; k < chord.noteCount; ++k) midi.addEvent(juce::MidiMessage::noteOn(1, chord.notes[(size_t) k], (juce::uint8) 127), 0);
+                            for (int block = 0; block < 44100 / blockSize; ++block) {
+                                audio.clear(); synth.render(audio, midi); midi.clear();
+                                for (int i = 0; i < blockSize; ++i) { const double x = audio.getSample(0, i); sum += x * x; ++n; }
+                            }
+                            for (int k = 0; k < chord.noteCount; ++k) midi.addEvent(juce::MidiMessage::noteOff(1, chord.notes[(size_t) k]), 0);
+                        }
+                        worst = std::min(worst, synth.takeMinLimiterGain());
+                    }
+                    std::cout << "  |  " << juce::String(juce::Decibels::gainToDecibels(std::sqrt(sum / (double) n)), 1)
+                              << " dB rms, lim " << juce::String(juce::Decibels::gainToDecibels(worst), 1);
+                }
+                std::cout << std::endl;
+            }
+            return 0;
+        }
         if (argc > 1 && juce::String(argv[1]) == "levels") {
             // RMS of a C major triad over its first second, before normalisation (to tune normalisationGain).
             for (int timbre = 0; timbre < (int) ccp::Timbre::count; ++timbre) {
