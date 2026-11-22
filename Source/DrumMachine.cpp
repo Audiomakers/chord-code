@@ -13,6 +13,7 @@ struct Line {
     float gain;
     float pan;
     bool bass;            // 808: tuned to the chord's bass note
+    float pitch = 1.0f;   // playback rate (0.5 = an octave down)
 };
 struct Pattern {
     const char* name;
@@ -30,12 +31,13 @@ const Pattern patterns[DrumMachine::patternCount] {
         { "open_808_wav",   "..............x.", 0.22f, -0.15f, false },
         { "bass_808_wav",   "X.....x...x.....", 0.62f, 0.0f, true } } },
     // Tamborzao: 3+3+2 kick twice per bar, clap on 2 and 4, tambor filling the gaps, heavy 808.
+    // Tamborzao (130 BPM): kick and a low tambor trading a 3-3-2 figure, claps on 2 and 4, 808 under the kick.
     { "FUNK BR", 0.0f, {
-        { "kick_knock_wav", "X..x..x.X..x..x.", 0.95f, 0.0f, false },
-        { "clap_1_wav",     "....X.......X...", 0.72f, 0.0f, false },
-        { "conga_wav",      "..o..x.x..o..x.x", 0.50f, 0.25f, false },
-        { "rim_808_wav",    ".......x.......x", 0.30f, -0.25f, false },
-        { "bass_808_wav",   "X..x..x.X..x..x.", 0.55f, 0.0f, true } } },
+        { "kick_knock_wav", "X.......X.x.....", 1.00f, 0.0f, false },
+        { "conga_wav",      "...X..X....X..X.", 0.85f, 0.1f, false, 0.55f },
+        { "clap_1_wav",     "....X.......X...", 0.75f, 0.0f, false },
+        { "conga_wav",      ".......o.......o", 0.30f, -0.2f, false, 0.8f },
+        { "bass_808_wav",   "X.......X.x.....", 0.58f, 0.0f, true } } },
     // Drill: sliding-feel kick, late snare, triplet-ish hats.
     { "DRILL", 0.0f, {
         { "kick_hammer_wav", "X......x..x.....", 0.95f, 0.0f, false },
@@ -69,11 +71,13 @@ const Pattern patterns[DrumMachine::patternCount] {
         { "rim_10_wav",    "..x..x..x...x.x.", 0.40f, -0.2f, false },
         { "conga_wav",     "......x.x.....x.", 0.45f, 0.25f, false },
         { "perc_skit_wav", "oxoxoxoxoxoxoxox", 0.22f, 0.1f, false } } },
+    // Memphis / drift phonk: half-time clap, rolling hats, cowbell-like perc, heavy 808.
     { "PHONK", 0.0f, {
-        { "kick_red_wav",  "X......x..x.....", 0.95f, 0.0f, false },
-        { "clap_bold_wav", "....X.......X...", 0.70f, 0.0f, false },
-        { "hat_pish_wav",  "xoxoxoxoxoxoxoxo", 0.28f, 0.15f, false },
-        { "bass_808_wav",  "X......x..x.....", 0.55f, 0.0f, true } } },
+        { "kick_red_wav",    "X.....X...X.....", 0.95f, 0.0f, false },
+        { "snare_smack_wav", "........X.......", 0.75f, 0.0f, false },
+        { "hat_pish_wav",    "x.x.xrx.x.x.xrx.", 0.28f, 0.15f, false },
+        { "perc_wood_wav",   "..x...x...x.x..x", 0.34f, -0.2f, false, 1.6f },
+        { "bass_808_wav",    "X.....X...X.....", 0.60f, 0.0f, true } } },
 };
 
 float level(char c) {
@@ -145,7 +149,7 @@ void DrumMachine::trigger(int line, float velocity, int64_t at) {
         if (semis > 6) semis -= 12;
         ratio = std::pow(2.0, semis / 12.0);
     }
-    a.inc = ratio * sampleRateOfAssets / sr;
+    a.inc = ratio * l.pitch * sampleRateOfAssets / sr;
     a.gain = l.gain * velocity;
     a.pan = l.pan;
 }

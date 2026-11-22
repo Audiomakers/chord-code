@@ -280,7 +280,7 @@ int main(int argc, char** argv) {
                     demo.prepareToPlay(44100, blockSize);
                     choice(demo, "beat", beat);
                     choice(demo, "bpmSync", 0);
-                    choice(demo, "manualBpm", beat == 2 ? 130 : beat == 6 ? 124 : beat == 1 || beat == 9 || beat == 3 ? 140 : 90);
+                    choice(demo, "manualBpm", beat == 2 ? 130 : beat == 6 ? 124 : beat == 9 ? 130 : beat == 1 || beat == 3 ? 140 : 90);
                     choice(demo, "length", 2);
                     demo.playSequence();
                     const auto opts = demo.midiOptions();
