@@ -16,6 +16,8 @@ public:
     juce::Component* getPanel() const { return content.get(); }
     // Re-centres the panel after it changed size.
     void layoutPanel();
+    // Used when the editor window is resized while a panel is open.
+    void setPanelScale(float scale) { uiScale = scale; layoutPanel(); repaint(); }
     std::function<void()> onDismiss;
 
     void paint(juce::Graphics&) override;
@@ -53,7 +55,11 @@ public:
         std::function<juce::String()> licenseEmail;
         std::function<bool()> updateAvailable;
         std::function<void()> checkForUpdates, changeLicense, close;
+        // Window size as a fraction of the 100% size; choosing one also makes it the default.
+        std::function<float()> windowScale;
+        std::function<void(float)> setWindowScale;
     };
+    static constexpr std::array<float, 5> windowScales { 0.75f, 0.9f, 1.0f, 1.25f, 1.5f };
     explicit SettingsPanel(Model);
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -66,7 +72,7 @@ private:
     static constexpr int panelWidth = 340;
     static constexpr std::array<int, 8> bpmValues { 80, 90, 100, 110, 120, 128, 140, 160 };
     juce::Rectangle<float> syncRow() const { return { 18.0f, 100.0f, (float) panelWidth - 36.0f, 40.0f }; }
-    juce::Rectangle<float> licenseRow() const { return { 18.0f, 290.0f, (float) panelWidth - 36.0f, 54.0f }; }
+    juce::Rectangle<float> licenseRow() const { return { 18.0f, 390.0f, (float) panelWidth - 36.0f, 54.0f }; }
     juce::Rectangle<float> changeLink() const { return licenseRow().removeFromRight(78.0f).reduced(8.0f, 13.0f); }
     juce::Rectangle<float> closeArea() const { return { (float) panelWidth - 46.0f, 14.0f, 30.0f, 30.0f }; }
     bool isOver(juce::Rectangle<float> r) const { return r.contains(mouse); }
@@ -74,6 +80,7 @@ private:
     Model model;
     PanelButton updates { juce::String::fromUTF8("Verificar atualizações"), false };
     std::array<juce::Rectangle<float>, 8> bpmAreas {};
+    std::array<juce::Rectangle<float>, 5> scaleAreas {};
     juce::Point<float> mouse { -1.0f, -1.0f };
 };
 

@@ -87,7 +87,7 @@ void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool
     g.setColour(colour);
     g.setFont(primary ? font(26.0f, true).withExtraKerningFactor(0.14f) : labelFont(16.5f));
     auto textArea = b.getLocalBounds().toFloat();
-    const bool icon = id == "play" || id == "variation" || id == "random" || id == "history" || id == "drag" || id == "save";
+    const bool icon = id == "play" || id == "variation" || id == "random" || id == "history" || id == "drag" || id == "dragWav" || id == "save";
     if (icon) textArea = textArea.withTrimmedLeft(34.0f);
     g.drawFittedText(b.getButtonText(), textArea.toNearestInt().reduced(8, 0), juce::Justification::centred, 1);
     if (!icon) return;
@@ -101,7 +101,7 @@ void ProLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& b, bool
     } else if (id == "variation") drawSvg(g, variationIcon.get(), iconArea);
     else if (id == "random") drawSvg(g, randomIcon.get(), iconArea.withSizeKeepingCentre(24.0f, 24.0f));
     else if (id == "history") drawHistoryIcon(g, iconArea, colour);
-    else if (id == "drag") drawSvg(g, dragIcon.get(), iconArea);
+    else if (id == "drag" || id == "dragWav") drawSvg(g, dragIcon.get(), iconArea);
     else if (id == "save") drawSvg(g, saveIcon.get(), iconArea);
 }
 
@@ -244,4 +244,33 @@ void ProLookAndFeel::getIdealPopupMenuItemSize(const juce::String& text, bool se
     const auto popupFont = getPopupMenuFont();
     height = standardHeight > 0 ? juce::jmax(standardHeight, 30) : juce::roundToInt(popupFont.getHeight() * 1.35f);
     width = juce::GlyphArrangement::getStringWidthInt(popupFont, text) + height * 2;
+}
+
+// Hover explanations (same look as the Melody Code): a dark card with an orange border.
+namespace {
+juce::TextLayout tooltipLayout(const juce::String& text) {
+    juce::AttributedString a;
+    a.setJustification(juce::Justification::centredLeft);
+    a.append(text, ChordCodeTheme::font(13.5f), juce::Colour(ChordCodeTheme::textPrimary));
+    juce::TextLayout layout;
+    layout.createLayoutWithBalancedLineLengths(a, 300.0f);
+    return layout;
+}
+}
+
+juce::Rectangle<int> ProLookAndFeel::getTooltipBounds(const juce::String& text, juce::Point<int> pos, juce::Rectangle<int> parent) {
+    const auto layout = tooltipLayout(text);
+    const int w = (int) std::ceil(layout.getWidth()) + 28, h = (int) std::ceil(layout.getHeight()) + 20;
+    return juce::Rectangle<int>(pos.x > parent.getCentreX() ? pos.x - (w + 12) : pos.x + 12,
+                                pos.y > parent.getCentreY() ? pos.y - (h + 8) : pos.y + 18, w, h)
+        .constrainedWithin(parent);
+}
+
+void ProLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text, int w, int h) {
+    const auto r = juce::Rectangle<float>(0, 0, (float) w, (float) h);
+    g.setColour(juce::Colour(ChordCodeTheme::surfaceRaised));
+    g.fillRoundedRectangle(r, 8.0f);
+    g.setColour(juce::Colour(ChordCodeTheme::orange).withAlpha(0.6f));
+    g.drawRoundedRectangle(r.reduced(0.5f), 8.0f, 1.0f);
+    tooltipLayout(text).draw(g, r.reduced(14.0f, 10.0f));
 }

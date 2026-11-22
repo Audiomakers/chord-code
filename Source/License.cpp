@@ -104,6 +104,17 @@ LicenseManager::~LicenseManager() {
 LicenseManager::Status LicenseManager::getStatus() const { const juce::ScopedLock sl(lock); return status; }
 juce::String LicenseManager::getEmail() const { const juce::ScopedLock sl(lock); return email; }
 
+double LicenseManager::getPreference(const juce::String& key, double fallback) const {
+    const juce::ScopedLock sl(lock);
+    return file->getDoubleValue(key, fallback);
+}
+
+void LicenseManager::setPreference(const juce::String& key, double value) {
+    const juce::ScopedLock sl(lock);
+    file->setValue(key, value);
+    file->saveIfNeeded();
+}
+
 juce::String LicenseManager::normaliseEmail(const juce::String& value) { return value.trim().toLowerCase(); }
 
 bool LicenseManager::isValidEmail(const juce::String& value) {

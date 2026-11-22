@@ -1,4 +1,4 @@
-# Chord Code 1.2.2
+# Chord Code 1.3.0
 
 Plugin de harmonia da Audio Makers desenvolvido em C++20 e JUCE 8.
 
@@ -35,8 +35,9 @@ falha de conexão.
 
 ## Créditos
 
-O timbre Piano usa samples do Salamander Grand Piano, de Alexander Holm,
-licenciados sob CC BY 3.0.
+O timbre Piano usa o Upright Piano KW do projeto FreePats (Gonzalo e Roberto),
+em domínio público (CC0 1.0). As batidas de referência usam sons do pack
+AMKR Formula 30 da Audio Makers.
 
 ## Compilação e testes
 
@@ -72,7 +73,7 @@ O build gera:
 
 - `Chord Code.vst3`;
 - `Chord Code.component`;
-- `Chord Code 1.2.2 macOS.pkg`.
+- `Chord Code 1.3.0 macOS.pkg`.
 
 ## GitHub Actions
 

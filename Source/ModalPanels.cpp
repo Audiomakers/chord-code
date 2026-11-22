@@ -194,15 +194,18 @@ SettingsPanel::SettingsPanel(Model m) : model(std::move(m)) {
         x += 77;
         if (i == 3) { x = 18; y += 38; }
     }
+    const float chipWidth = ((float) panelWidth - 36.0f - 4.0f * 7.0f) / 5.0f;
+    for (size_t i = 0; i < scaleAreas.size(); ++i)
+        scaleAreas[i] = { 18.0f + (float) i * (chipWidth + 7.0f), 290.0f, chipWidth, 32.0f };
     addAndMakeVisible(updates);
     updates.onClick = [this] { if (model.checkForUpdates) model.checkForUpdates(); };
     updates.showUpdateDot = model.updateAvailable && model.updateAvailable();
     if (updates.showUpdateDot) startTimerHz(30);
-    setSize(panelWidth, 494);
+    setSize(panelWidth, 594);
 }
 
 void SettingsPanel::resized() {
-    updates.setBounds(18, 392, panelWidth - 36, 42);
+    updates.setBounds(18, 492, panelWidth - 36, 42);
 }
 
 void SettingsPanel::paint(juce::Graphics& g) {
@@ -262,8 +265,32 @@ void SettingsPanel::paint(juce::Graphics& g) {
     g.drawText(utf("Escolher um BPM desliga a sincronização"), 18, 228, panelWidth - 36, 18, juce::Justification::centredLeft);
     drawDivider(g, 258.0f, width);
 
+    // Window: default size for every new Chord Code window on this computer.
+    sectionLabel(g, "JANELA", 268.0f);
+    const float currentScale = model.windowScale ? model.windowScale() : 1.0f;
+    for (size_t i = 0; i < scaleAreas.size(); ++i) {
+        const auto chip = scaleAreas[i];
+        const bool active = std::abs(currentScale - windowScales[i]) < 0.01f;
+        const bool over = isOver(chip);
+        if (active) { g.setGradientFill(accentGradient(chip)); g.fillRoundedRectangle(chip, 8.0f); }
+        else {
+            g.setColour(over ? juce::Colour(surfaceHover) : juce::Colour(surfaceRaised));
+            g.fillRoundedRectangle(chip, 8.0f);
+            g.setColour(over ? juce::Colour(orange).withAlpha(0.7f) : juce::Colour(border));
+            g.drawRoundedRectangle(chip.reduced(0.5f), 8.0f, 1.0f);
+        }
+        g.setColour(active ? juce::Colour(0xff160904) : juce::Colour(textPrimary));
+        g.setFont(font(14.5f, true));
+        g.drawText(juce::String(juce::roundToInt(windowScales[i] * 100.0f)) + "%", chip, juce::Justification::centred);
+    }
+    g.setColour(juce::Colour(textQuiet));
+    g.setFont(font(12.0f));
+    g.drawText(utf("Tamanho padrão ao abrir o Chord Code"), 18, 328, panelWidth - 36, 18,
+               juce::Justification::centredLeft);
+    drawDivider(g, 358.0f, width);
+
     // License: who this copy is registered to.
-    sectionLabel(g, utf("LICENÇA"), 268.0f);
+    sectionLabel(g, utf("LICENÇA"), 368.0f);
     auto lic = licenseRow();
     g.setColour(juce::Colour(surfaceRaised));
     g.fillRoundedRectangle(lic, 10.0f);
@@ -283,14 +310,14 @@ void SettingsPanel::paint(juce::Graphics& g) {
     g.setColour(isOver(link) ? juce::Colour(orangeLight) : juce::Colour(textSecondary));
     g.setFont(font(12.5f, true));
     g.drawText("Trocar", link, juce::Justification::centredRight);
-    drawDivider(g, 360.0f, width);
+    drawDivider(g, 460.0f, width);
 
-    sectionLabel(g, utf("ATUALIZAÇÕES"), 370.0f);
+    sectionLabel(g, utf("ATUALIZAÇÕES"), 470.0f);
     g.setColour(juce::Colour(textQuiet));
     g.setFont(labelFont(11.0f));
-    g.drawText("BY AUDIO MAKERS", 18, 448, panelWidth - 36, 16, juce::Justification::centredLeft);
+    g.drawText("BY AUDIO MAKERS", 18, 548, panelWidth - 36, 16, juce::Justification::centredLeft);
     g.setFont(font(11.0f));
-    g.drawText(utf("Piano: Salamander Grand Piano, Alexander Holm (CC BY 3.0)"), 18, 464, panelWidth - 36, 16,
+    g.drawText(utf("Piano: Upright Piano KW, FreePats (CC0) · Batidas: AMKR Formula 30"), 18, 564, panelWidth - 36, 16,
                juce::Justification::centredLeft);
 }
 
@@ -300,6 +327,8 @@ void SettingsPanel::mouseUp(const juce::MouseEvent& e) {
     if (changeLink().contains(e.position)) { if (model.changeLicense) model.changeLicense(); return; }
     for (size_t i = 0; i < bpmValues.size(); ++i)
         if (bpmAreas[i].contains(e.position)) { model.setManualBpm(bpmValues[i]); repaint(); return; }
+    for (size_t i = 0; i < scaleAreas.size(); ++i)
+        if (scaleAreas[i].contains(e.position)) { if (model.setWindowScale) model.setWindowScale(windowScales[i]); repaint(); return; }
 }
 
 // ---------------------------------------------------------------------------

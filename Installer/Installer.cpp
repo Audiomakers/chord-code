@@ -10,7 +10,7 @@
 #include <gdiplus.h>
 
 #ifndef CCP_VERSION
-#define CCP_VERSION L"1.2.2"
+#define CCP_VERSION L"1.3.0"
 #endif
 
 namespace {

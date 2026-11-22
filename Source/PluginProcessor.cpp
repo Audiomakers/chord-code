@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include <cmath>
+#include <set>
 
 namespace {
 juce::String utf(const char* s) { return juce::String::fromUTF8(s); }
@@ -29,6 +30,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout ChordCodeProProcessor::layou
     p.push_back(std::make_unique<juce::AudioParameterInt>("velocity", "Volume", 0, 100, 100));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("previewGain", utf("Volume de prévia"), 0.0f, 1.0f, 0.68f));
     p.push_back(std::make_unique<juce::AudioParameterBool>("bpmSync", "Sincronizar BPM", true));
+    p.push_back(std::make_unique<juce::AudioParameterChoice>("groove", utf("Alternância"),
+        juce::StringArray { "IGUAL", "LONGO-CURTO", "CURTO-LONGO" }, 0));
+    {
+        juce::StringArray beats;
+        for (int i = 0; i < DrumMachine::patternCount; ++i) beats.add(DrumMachine::patternName(i));
+        p.push_back(std::make_unique<juce::AudioParameterChoice>("beat", utf("Batida de referência"), beats, 0));
+    }
+    p.push_back(std::make_unique<juce::AudioParameterChoice>("keyMode", "Teclado MIDI",
+        juce::StringArray { "NOTAS", "ACORDES DO TOM", "TECLAS BRANCAS" }, 0));
     p.push_back(std::make_unique<juce::AudioParameterInt>("manualBpm", "BPM manual", 40, 240, 120));
     return { p.begin(), p.end() };
 }
@@ -75,12 +85,14 @@ ccp::MidiOptions ChordCodeProProcessor::midiOptions() const {
     options.velocity = juce::jlimit(1, 127, juce::roundToInt((float) volume * 1.27f));
     options.rhythm = (ccp::MidiRhythm) (int) *apvts.getRawParameterValue("rhythm");
     options.style = (ccp::Style) (int) *apvts.getRawParameterValue("style");
+    options.groove = (ccp::Groove) juce::jlimit(0, (int) ccp::Groove::count - 1, (int) *apvts.getRawParameterValue("groove"));
     return options;
 }
 
 void ChordCodeProProcessor::prepareToPlay(double sampleRate, int maximumBlockSize) {
     sr = sampleRate > 1.0 ? sampleRate : 44100.0;
     synth.prepare(sr, maximumBlockSize);
+    drums.prepare(sr);
     outputGain = *apvts.getRawParameterValue("previewGain") * *apvts.getRawParameterValue("velocity") / 100.0f;
     stopPreview();
     setPreviewTimbreIfNeeded();
@@ -112,6 +124,7 @@ void ChordCodeProProcessor::publish(const ccp::Progression& p, bool addHistory) 
             entry.rhythm = (int) *apvts.getRawParameterValue("rhythm");
             entry.length = (int) *apvts.getRawParameterValue("length");
             entry.velocity = (int) *apvts.getRawParameterValue("velocity");
+            entry.groove = (int) *apvts.getRawParameterValue("groove");
             history.insert(history.begin(), entry);
             if (history.size() > 10)
                 history.resize(10);
@@ -279,6 +292,7 @@ bool ChordCodeProProcessor::restoreHistory(int index) {
     setChoice("rhythm", selected.rhythm);
     setChoice("length", selected.length);
     setChoice("velocity", selected.velocity);
+    setChoice("groove", selected.groove);
     publish(selected.progression);
     return true;
 }
@@ -310,7 +324,8 @@ double ChordCodeProProcessor::hostBpm() const {
 
 void ChordCodeProProcessor::scheduleChord(juce::MidiBuffer& m, const ccp::Chord& c, int chordIndex,
                                           int64_t chordStart, int64_t chordDuration,
-                                          int64_t blockStart, int64_t blockEnd, ccp::MidiRhythm rhythm) {
+                                          int64_t blockStart, int64_t blockEnd, ccp::MidiRhythm rhythm,
+                                          double sampleRate) {
     const int volume = juce::jlimit(0, 100, (int) *apvts.getRawParameterValue("velocity"));
     const int baseVelocity = juce::jlimit(1, 127, juce::roundToInt((float) volume * 1.27f));
     for (int i = 0; i < c.noteCount; ++i) {
@@ -318,10 +333,10 @@ void ChordCodeProProcessor::scheduleChord(juce::MidiBuffer& m, const ccp::Chord&
         int64_t offset = 0;
         int velocity = baseVelocity;
         if (rhythm == ccp::MidiRhythm::humanize) {
-            offset = (int64_t) std::llround(sr * (0.012 + 0.003 * (double) ((chordIndex * 17 + i * 23) % 11)));
+            offset = (int64_t) std::llround(sampleRate * (0.012 + 0.003 * (double) ((chordIndex * 17 + i * 23) % 11)));
             velocity = juce::jlimit(1, 127, velocity + ((chordIndex * 11 + i * 7) % 13) - 6);
         } else if (rhythm == ccp::MidiRhythm::strum) {
-            offset = (int64_t) std::llround(sr * 0.027 * (double) i);
+            offset = (int64_t) std::llround(sampleRate * 0.027 * (double) i);
         } else if (rhythm == ccp::MidiRhythm::arpeggio) {
             offset = i * juce::jmax<int64_t>(1, chordDuration / juce::jmax(1, c.noteCount));
         }
@@ -351,7 +366,7 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
     b.clear();
     setPreviewTimbreIfNeeded();
     juce::MidiBuffer events;
-    events.addEvents(incoming, 0, b.getNumSamples(), 0);
+    handleKeyboard(incoming, events, b.getNumSamples());
     const int cmd = command.exchange(0);
     auto p = getProgression();
 
@@ -394,31 +409,67 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
         auditionMode = false;
     }
 
+    const int beat = juce::jlimit(0, DrumMachine::patternCount - 1, (int) *apvts.getRawParameterValue("beat"));
+    drums.setPattern(beat);
+    // Drum segments for this block: { offset in block, samples, timeline position }.
+    struct Segment { int offset; int count; int64_t position; };
+    std::array<Segment, 2> beatSegments {};
+    int beatSegmentCount = 0;
+    double beatBpm = 120.0;
+
     if (playing >= 0 && playing < p.chordCount) {
         const auto options = midiOptions();
-        const int64_t chordSamples = juce::jmax<int64_t>(1, (int64_t) std::llround(sr * 60.0 / options.bpm * options.beatsPerChord));
+        beatBpm = options.bpm;
         const int64_t auditionSamples = juce::jmax<int64_t>(1, (int64_t) std::llround(sr * juce::jmax(0.45, 60.0 / options.bpm)));
         const int64_t blockEnd = playheadSamples + b.getNumSamples();
         if (auditionMode) {
             const auto& auditionedChord = customAudition ? customPreviewChord : p.chords[(size_t) playing];
             scheduleChord(events, auditionedChord, playing, 0, auditionSamples,
-                          playheadSamples, blockEnd, options.rhythm);
+                          playheadSamples, blockEnd, options.rhythm, sr);
             if (blockEnd >= auditionSamples) {
                 playing = -1;
                 auditionMode = false;
             }
+            playheadSamples = blockEnd;
         } else {
-            const int64_t total = chordSamples * p.chordCount;
-            const int first = juce::jlimit(0, p.chordCount - 1, (int) (playheadSamples / chordSamples));
-            const int last = juce::jlimit(0, p.chordCount - 1, (int) ((juce::jmin(blockEnd, total) - 1) / chordSamples));
-            for (int i = first; i <= last; ++i) {
-                scheduleChord(events, p.chords[(size_t) i], i, (int64_t) i * chordSamples, chordSamples,
-                              playheadSamples, blockEnd, options.rhythm);
+            const int64_t total = juce::jmax<int64_t>(1, chordStartSamples(options, p.chordCount, sr));
+            // With a reference beat on, REPRODUZIR loops until stopped.
+            const bool loop = beat > 0;
+            const bool wraps = loop && blockEnd > total;
+            for (int64_t pass : { (int64_t) 0, total }) {
+                if (pass > 0 && !wraps) break;
+                for (int i = 0; i < p.chordCount; ++i) {
+                    const auto start = pass + chordStartSamples(options, i, sr), length = chordLengthSamples(options, i, sr);
+                    if (start < blockEnd && start + length > playheadSamples)
+                        scheduleChord(events, p.chords[(size_t) i], i, start, length, playheadSamples, blockEnd, options.rhythm, sr);
+                }
             }
-            if (playheadSamples < total) active.store(last);
-            if (blockEnd >= total) { playing = -1; }
+            const int64_t probe = wraps ? (blockEnd - 1) - total : juce::jmin(blockEnd, total) - 1;
+            int current = 0;
+            for (int i = 0; i < p.chordCount; ++i)
+                if (chordStartSamples(options, i, sr) <= probe) current = i;
+            if (playheadSamples < total) active.store(current);
+
+            if (loop) {
+                std::array<int64_t, ccp::maxChords> bassStarts {};
+                std::array<int, ccp::maxChords> bassNotes {};
+                for (int i = 0; i < p.chordCount; ++i) {
+                    const auto& chord = p.chords[(size_t) i];
+                    int lowest = chord.notes[0];
+                    for (int n = 1; n < chord.noteCount; ++n) lowest = juce::jmin(lowest, chord.notes[(size_t) n]);
+                    bassStarts[(size_t) i] = chordStartSamples(options, i, sr);
+                    bassNotes[(size_t) i] = ((lowest % 12) + 12) % 12;
+                }
+                drums.setBassNotes(bassStarts.data(), bassNotes.data(), p.chordCount);
+                const int first = (int) juce::jmin<int64_t>(b.getNumSamples(), juce::jmax<int64_t>(0, total - playheadSamples));
+                if (first > 0) beatSegments[(size_t) beatSegmentCount++] = { 0, first, playheadSamples };
+                if (first < b.getNumSamples()) beatSegments[(size_t) beatSegmentCount++] = { first, b.getNumSamples() - first, 0 };
+                playheadSamples = wraps ? blockEnd - total : blockEnd;
+            } else {
+                if (blockEnd >= total) playing = -1;
+                playheadSamples = blockEnd;
+            }
         }
-        playheadSamples = blockEnd;
     }
 
     synth.render(b, events);
@@ -426,10 +477,301 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
     const float targetGain = *apvts.getRawParameterValue("previewGain") * volume;
     b.applyGainRamp(0, b.getNumSamples(), outputGain, targetGain);
     outputGain = targetGain;
+    const float beatGain = *apvts.getRawParameterValue("previewGain") * 0.4f;
+    if (beatSegmentCount == 0)
+        drums.render(b, 0, b.getNumSamples(), 0, beatBpm, false, beatGain);   // lets the last hits ring out
+    for (int i = 0; i < beatSegmentCount; ++i)
+        drums.render(b, beatSegments[(size_t) i].offset, beatSegments[(size_t) i].count, beatSegments[(size_t) i].position,
+                     beatBpm, true, beatGain);
     if (playing < 0) {
         releaseSamples = juce::jmax<int64_t>(0, releaseSamples - b.getNumSamples());
         if (releaseSamples == 0) active.store(-1);
     }
+}
+
+bool ChordCodeProProcessor::renderWav(juce::MemoryBlock& destination) {
+    const auto p = getProgression();
+    if (p.chordCount <= 0) return false;
+    const auto options = midiOptions();
+    constexpr double rate = 44100.0;
+    constexpr int blockSize = 512;
+    const int64_t loop = chordStartSamples(options, p.chordCount, rate);
+
+    PreviewSynth offline;
+    offline.prepare(rate, blockSize);
+    offline.setTimbre((ccp::Timbre) (int) *apvts.getRawParameterValue("timbre"));
+    juce::AudioBuffer<float> result(2, (int) loop), chunk(2, blockSize);
+    result.clear();
+    for (int64_t position = 0; position < loop * 2; position += blockSize) {
+        const int count = (int) juce::jmin<int64_t>(blockSize, loop * 2 - position);
+        juce::MidiBuffer events;
+        for (int pass = 0; pass < 2; ++pass)
+            for (int i = 0; i < p.chordCount; ++i)
+                scheduleChord(events, p.chords[(size_t) i], i, pass * loop + chordStartSamples(options, i, rate),
+                              chordLengthSamples(options, i, rate), position, position + count, options.rhythm, rate);
+        chunk.setSize(2, count, false, false, true);
+        chunk.clear();
+        offline.render(chunk, events);
+        // Keep the second pass only.
+        const int64_t from = juce::jmax(position, loop);
+        if (position + count > loop)
+            for (int c = 0; c < 2; ++c)
+                result.copyFrom(c, (int) (from - loop), chunk, c, (int) (from - position), (int) (position + count - from));
+    }
+
+    // Same level for every timbre and volume setting: peak at -1 dBFS.
+    const float peak = result.getMagnitude(0, result.getNumSamples());
+    if (!std::isfinite(peak) || peak < 1.0e-5f) return false;
+    result.applyGain(0.891f / peak);
+
+    destination.reset();
+    auto stream = std::make_unique<juce::MemoryOutputStream>(destination, false);
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::AudioFormatWriter> writer(wav.createWriterFor(stream.get(), rate, 2, 24, {}, 0));
+    if (writer == nullptr) return false;
+    stream.release();   // owned by the writer now
+    const bool written = writer->writeFromAudioSampleBuffer(result, 0, result.getNumSamples());
+    writer.reset();     // flushes the header into destination
+    return written && destination.getSize() > 44;
+}
+
+int64_t ChordCodeProProcessor::chordStartSamples(const ccp::MidiOptions& o, int index, double rate) const {
+    return (int64_t) std::llround(rate * 60.0 / o.bpm * ccp::chordStartBeats(o, index));
+}
+
+int64_t ChordCodeProProcessor::chordLengthSamples(const ccp::MidiOptions& o, int index, double rate) const {
+    return juce::jmax<int64_t>(1, chordStartSamples(o, index + 1, rate) - chordStartSamples(o, index, rate));
+}
+
+// ---- MIDI keyboard -------------------------------------------------------------------------
+
+namespace {
+int wrap12(int n) { n %= 12; return n < 0 ? n + 12 : n; }
+ccp::ChordKind keyboardKind(const ccp::GenerationSettings& s) {
+    switch (s.complexity) {
+        case ccp::Complexity::simple: return ccp::ChordKind::triad;
+        case ccp::Complexity::colorful: return ccp::ChordKind::add9;
+        case ccp::Complexity::rich: return ccp::ChordKind::seventh;
+        default: break;
+    }
+    const bool rich = s.style == ccp::Style::rnb || s.style == ccp::Style::loFi || s.style == ccp::Style::jazz
+                   || s.mood == ccp::Mood::romantic || s.mood == ccp::Mood::mysterious;
+    return rich ? ccp::ChordKind::seventh : ccp::ChordKind::triad;
+}
+}
+
+void ChordCodeProProcessor::refreshKeyboardChords() {
+    const auto s = settingsFromParams();
+    const uint64_t hash = (uint64_t) s.key | ((uint64_t) s.scale << 4) | ((uint64_t) s.complexity << 8)
+                        | ((uint64_t) s.voicing << 12) | ((uint64_t) s.style << 16) | ((uint64_t) s.mood << 24);
+    if (hash == keyboardSettingsHash) return;
+    keyboardSettingsHash = hash;
+    const auto kind = keyboardKind(s);
+    for (int d = 0; d < 7; ++d) {
+        const auto chord = ccp::HarmonyEngine::buildChord(s, d, kind);
+        keyboardChordSizes[(size_t) d] = chord.noteCount;
+        keyboardChords[(size_t) d] = chord.notes;
+    }
+}
+
+void ChordCodeProProcessor::handleKeyboard(const juce::MidiBuffer& incoming, juce::MidiBuffer& out, int numSamples) {
+    const int mode = juce::jlimit(0, (int) KeyMode::count - 1, (int) *apvts.getRawParameterValue("keyMode"));
+    if (mode != lastKeyMode) {
+        // Release everything the previous mode was holding.
+        for (int n = 0; n < 128; ++n)
+            if (soundingCount[(size_t) n] > 0 || heldChordSize[(size_t) n] > 0) out.addEvent(juce::MidiMessage::noteOff(1, n), 0);
+        heldChordSize.fill(0);
+        soundingCount.fill(0);
+        lastKeyMode = mode;
+    }
+    const bool chordMode = mode != (int) KeyMode::notes;
+    if (chordMode) refreshKeyboardChords();
+    const auto scale = ccp::HarmonyEngine::scaleNotes((int) *apvts.getRawParameterValue("key"),
+                                                      (ccp::ScaleType) (int) *apvts.getRawParameterValue("scale"));
+    const bool capturing = captureSlot.load(std::memory_order_relaxed) >= 0;
+
+    for (const auto metadata : incoming) {
+        const auto message = metadata.getMessage();
+        const int at = juce::jlimit(0, juce::jmax(0, numSamples - 1), metadata.samplePosition);
+        if (!message.isNoteOnOrOff()) { out.addEvent(message, at); continue; }
+        const int key = message.getNoteNumber();
+
+        if (capturing) {
+            const juce::SpinLock::ScopedTryLockType lock(captureLock);
+            if (lock.isLocked() && !captureReady) {
+                if (message.isNoteOn()) {
+                    ++captureHeld;
+                    if (chordMode) {
+                        int degree = 0;
+                        if (mode == (int) KeyMode::whiteKeys) {
+                            static constexpr int white[] { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 };
+                            degree = white[wrap12(key)];
+                        } else {
+                            for (int d = 1; d < 7; ++d)
+                                if (wrap12(key - scale[(size_t) d]) < wrap12(key - scale[(size_t) degree])) degree = d;
+                        }
+                        // Record the notes exactly as they sound, in the octave that was played.
+                        const int lowest = keyboardChords[(size_t) degree][0];
+                        const int shift = 12 * (int) std::lround((double) (key - lowest) / 12.0);
+                        captureCount = 0;
+                        for (int i = 0; i < keyboardChordSizes[(size_t) degree] && i < (int) captureNotes.size(); ++i)
+                            captureNotes[(size_t) captureCount++] = juce::jlimit(0, 127, keyboardChords[(size_t) degree][(size_t) i] + shift);
+                        captureDegree = degree;
+                        captureReady = true;
+                    } else if (captureCount < (int) captureNotes.size()) {
+                        bool known = false;
+                        for (int i = 0; i < captureCount; ++i) known |= captureNotes[(size_t) i] == key;
+                        if (!known) captureNotes[(size_t) captureCount++] = key;
+                    }
+                } else {
+                    captureHeld = juce::jmax(0, captureHeld - 1);
+                    // The chord is complete when every key has been let go.
+                    if (!chordMode && captureHeld == 0 && captureCount > 0) captureReady = true;
+                }
+            }
+        }
+
+        if (!chordMode) { out.addEvent(message, at); continue; }
+
+        auto& held = heldChord[(size_t) key];
+        auto& heldSize = heldChordSize[(size_t) key];
+        if (message.isNoteOn()) {
+            for (int i = 0; i < heldSize; ++i) {   // retrigger of the same key
+                const int n = held[(size_t) i];
+                if (--soundingCount[(size_t) n] <= 0) { soundingCount[(size_t) n] = 0; out.addEvent(juce::MidiMessage::noteOff(1, n), at); }
+            }
+            int degree = 0;
+            if (mode == (int) KeyMode::whiteKeys) {
+                static constexpr int white[] { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 };
+                degree = white[wrap12(key)];
+            } else {
+                for (int d = 1; d < 7; ++d)
+                    if (wrap12(key - scale[(size_t) d]) < wrap12(key - scale[(size_t) degree])) degree = d;
+            }
+            // The chord follows the octave you play in: its lowest note lands near the key pressed.
+            const int lowest = keyboardChords[(size_t) degree][0];
+            const int shift = 12 * (int) std::lround((double) (key - lowest) / 12.0);
+            heldSize = 0;
+            for (int i = 0; i < keyboardChordSizes[(size_t) degree]; ++i) {
+                const int n = juce::jlimit(0, 127, keyboardChords[(size_t) degree][(size_t) i] + shift);
+                held[(size_t) heldSize++] = n;
+                if (soundingCount[(size_t) n]++ > 0) out.addEvent(juce::MidiMessage::noteOff(1, n), at);
+                out.addEvent(juce::MidiMessage::noteOn(1, n, message.getVelocity()), at);
+            }
+        } else {
+            for (int i = 0; i < heldSize; ++i) {
+                const int n = held[(size_t) i];
+                if (--soundingCount[(size_t) n] <= 0) { soundingCount[(size_t) n] = 0; out.addEvent(juce::MidiMessage::noteOff(1, n), at); }
+            }
+            heldSize = 0;
+        }
+    }
+}
+
+void ChordCodeProProcessor::armCapture(int slot) {
+    const juce::SpinLock::ScopedLockType lock(captureLock);
+    captureCount = 0; captureHeld = 0; captureDegree = -1; captureReady = false;
+    captureSlot.store(slot >= 0 && slot < getProgression().chordCount && captureSlot.load() != slot ? slot : -1);
+}
+
+ccp::Chord ChordCodeProProcessor::chordFromNotes(const ccp::GenerationSettings& settings, std::vector<int> notes) {
+    std::sort(notes.begin(), notes.end());
+    notes.erase(std::unique(notes.begin(), notes.end()), notes.end());
+    if (notes.empty()) return {};
+    static constexpr const char* names[] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    const auto scale = ccp::HarmonyEngine::scaleNotes(settings.key, settings.scale);
+    const int bass = wrap12(notes.front());
+
+    std::set<int> classes;
+    for (int n : notes) classes.insert(wrap12(n));
+    if (classes.size() < 3) {
+        // One note or two: the scale's chord on the lowest note (major if it is outside the scale).
+        int degree = -1;
+        for (int d = 0; d < 7; ++d) if (scale[(size_t) d] == bass) degree = d;
+        auto chord = degree >= 0 ? ccp::HarmonyEngine::buildChord(settings, degree, ccp::ChordKind::triad)
+                                 : ccp::HarmonyEngine::buildChromaticChord(settings, bass, 0);
+        const int shift = 12 * ((notes.front() - chord.notes[0]) / 12);
+        for (int i = 0; i < chord.noteCount; ++i) chord.notes[(size_t) i] = juce::jlimit(0, 127, chord.notes[(size_t) i] + shift);
+        return chord;
+    }
+
+    // Best root and quality: every played pitch class explained, few missing, bass as root preferred.
+    struct Quality { const char* suffix; std::vector<int> intervals; };
+    static const std::vector<Quality> qualities { { "", { 0, 4, 7 } }, { "m", { 0, 3, 7 } }, { "7", { 0, 4, 7, 10 } },
+        { "maj7", { 0, 4, 7, 11 } }, { "m7", { 0, 3, 7, 10 } }, { "dim", { 0, 3, 6 } }, { "m7b5", { 0, 3, 6, 10 } },
+        { "dim7", { 0, 3, 6, 9 } }, { "aug", { 0, 4, 8 } }, { "sus2", { 0, 2, 7 } }, { "sus4", { 0, 5, 7 } },
+        { "add9", { 0, 2, 4, 7 } }, { "9", { 0, 2, 4, 7, 10 } }, { "maj9", { 0, 2, 4, 7, 11 } }, { "m9", { 0, 2, 3, 7, 10 } } };
+    int bestRoot = bass, bestQuality = 0, bestScore = -1000;
+    for (int root : classes) {
+        for (int q = 0; q < (int) qualities.size(); ++q) {
+            std::set<int> wanted;
+            for (int i : qualities[(size_t) q].intervals) wanted.insert(wrap12(root + i));
+            int score = 0;
+            for (int c : classes) score += wanted.count(c) ? 4 : -6;
+            for (int w : wanted) if (!classes.count(w)) score -= w == wrap12(root + 7) ? 1 : 5;   // a missing fifth is fine
+            if (root == bass) score += 2;
+            score -= (int) qualities[(size_t) q].intervals.size() / 4;   // prefer the simpler name on ties
+            if (score > bestScore) { bestScore = score; bestRoot = root; bestQuality = q; }
+        }
+    }
+    ccp::Chord chord;
+    chord.root = bestRoot;
+    chord.quality = bestQuality;
+    chord.kind = ccp::ChordKind::triad;
+    int degree = 0;
+    for (int d = 1; d < 7; ++d) if (wrap12(bestRoot - scale[(size_t) d]) < wrap12(bestRoot - scale[(size_t) degree])) degree = d;
+    chord.degree = degree;
+    chord.name = std::string(names[bestRoot]) + qualities[(size_t) bestQuality].suffix;
+    if (bass != bestRoot) chord.name += std::string("/") + names[bass];
+    // Keep the exact voicing (up to five notes, dropping doubled pitch classes first from the top).
+    std::vector<int> kept;
+    std::set<int> seen;
+    for (int n : notes) if (seen.insert(wrap12(n)).second) kept.push_back(n);
+    for (int n : notes) if ((int) kept.size() < 3 && std::find(kept.begin(), kept.end(), n) == kept.end()) kept.push_back(n);
+    std::sort(kept.begin(), kept.end());
+    if (kept.size() > 5) kept.resize(5);
+    chord.noteCount = (int) kept.size();
+    for (int i = 0; i < chord.noteCount; ++i) chord.notes[(size_t) i] = kept[(size_t) i];
+    chord.velocity = 88;
+    return chord;
+}
+
+bool ChordCodeProProcessor::applyPendingCapture() {
+    int slot = captureSlot.load();
+    if (slot < 0) return false;
+    std::vector<int> notes;
+    int degree = -1;
+    {
+        const juce::SpinLock::ScopedLockType lock(captureLock);
+        if (!captureReady) return false;
+        notes.assign(captureNotes.begin(), captureNotes.begin() + captureCount);
+        degree = captureDegree;
+        captureReady = false; captureCount = 0; captureHeld = 0; captureDegree = -1;
+        captureSlot.store(-1);
+    }
+    auto p = getProgression();
+    if (slot >= p.chordCount) return false;
+    // Keep the notes exactly as they sounded (same octave and voicing), named by root and quality.
+    p.chords[(size_t) slot] = chordFromNotes(p.settings, notes);
+    if (degree >= 0 && !notes.empty()) {
+        // Chord modes: named after the key pressed (G, not G/B for an inverted voicing).
+        const auto settings = settingsFromParams();
+        const auto rootPosition = ccp::HarmonyEngine::buildChord(settings, degree, keyboardKind(settings));
+        auto named = chordFromNotes(settings, std::vector<int>(rootPosition.notes.begin(), rootPosition.notes.begin() + rootPosition.noteCount));
+        if (named.quality >= 0) {
+            named.name = named.name.substr(0, named.name.find('/'));
+            std::sort(notes.begin(), notes.end());
+            named.noteCount = juce::jmin(5, (int) notes.size());
+            for (int i = 0; i < named.noteCount; ++i) named.notes[(size_t) i] = notes[(size_t) i];
+            p.chords[(size_t) slot] = named;
+        }
+    }
+    if (p.chords[(size_t) slot].noteCount < 3) return false;
+    ++p.identity;
+    publish(p);
+    locks[(size_t) slot].store(true);
+    persistProgression();
+    return true;
 }
 
 void ChordCodeProProcessor::playSequence() { command.store(1); }
@@ -543,13 +885,23 @@ bool ChordCodeProProcessor::restoreProgression() {
 
 void ChordCodeProProcessor::getStateInformation(juce::MemoryBlock& d) {
     persistProgression();
-    if (auto xml = apvts.copyState().createXml())
+    if (auto xml = apvts.copyState().createXml()) {
+        xml->setAttribute("timbreOrder", 2);
         copyXmlToBinary(*xml, d);
+    }
 }
 
 void ChordCodeProProcessor::setStateInformation(const void* d, int n) {
     if (auto xml = getXmlFromBinary(d, n))
         if (xml->hasTagName(apvts.state.getType())) {
+            // Before 1.3 the timbre menu ended with PIANO; now it starts with it.
+            if (xml->getIntAttribute("timbreOrder", 1) < 2)
+                for (auto* param : xml->getChildWithTagNameIterator("PARAM"))
+                    if (param->getStringAttribute("id") == "timbre") {
+                        const int old = param->getIntAttribute("value");
+                        param->setAttribute("value", (old + 1) % (int) ccp::Timbre::count);
+                    }
+            xml->removeAttribute("timbreOrder");
             apvts.replaceState(juce::ValueTree::fromXml(*xml));
             if (!restoreProgression()) {
                 slots[0] = generator.generate(settingsFromParams());
