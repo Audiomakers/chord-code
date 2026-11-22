@@ -17,15 +17,16 @@ juce::StringArray names(NameFn fn) {
 
 juce::AudioProcessorValueTreeState::ParameterLayout ChordCodeProProcessor::layout() {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> p;
-    p.push_back(std::make_unique<juce::AudioParameterInt>("key", "Tom", 0, 11, 0));
-    p.push_back(std::make_unique<juce::AudioParameterChoice>("scale", "Escala", names<ccp::ScaleType>(ccp::scaleName), 1));
+    p.push_back(std::make_unique<juce::AudioParameterChoice>("key", "Tom",
+        juce::StringArray { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", utf("AUTOMÁTICO") }, 0));
+    p.push_back(std::make_unique<juce::AudioParameterChoice>("scale", "Escala", [] { auto a = names<ccp::ScaleType>(ccp::scaleName); a.add(utf("AUTOMÁTICO")); return a; }(), 1));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("style", "Estilo", names<ccp::Style>(ccp::styleName), (int) ccp::Style::standard));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("mood", "Vibe", names<ccp::Mood>(ccp::moodName), (int) ccp::Mood::standard));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("complexity", "Complexidade", names<ccp::Complexity>(ccp::complexityName), (int) ccp::Complexity::automatic));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("tension", "Tensão", names<ccp::Tension>(ccp::tensionName), (int) ccp::Tension::standard));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("timbre", "Timbre", names<ccp::Timbre>(ccp::timbreName), (int) ccp::Timbre::piano));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("voicing", "Voicing", names<ccp::Voicing>(ccp::voicingName), (int) ccp::Voicing::standard));
-    p.push_back(std::make_unique<juce::AudioParameterChoice>("rhythm", "Ritmo MIDI", juce::StringArray { "RETO", "HUMANIZE", "STRUM", "ARPEJO" }, 0));
+    p.push_back(std::make_unique<juce::AudioParameterChoice>("rhythm", "Arranjo", [] { juce::StringArray a; for (int i = 0; i < (int) ccp::MidiRhythm::count; ++i) a.add(utf(ccp::rhythmName((ccp::MidiRhythm) i))); return a; }(), 0));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("length", "Comprimento", juce::StringArray { "1 TEMPO", "2 TEMPOS", "4 TEMPOS" }, 1));
     p.push_back(std::make_unique<juce::AudioParameterInt>("velocity", "Volume", 0, 100, 100));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("previewGain", utf("Volume de prévia"), 0.0f, 1.0f, 0.68f));
@@ -58,8 +59,10 @@ ChordCodeProProcessor::~ChordCodeProProcessor() {
 
 ccp::GenerationSettings ChordCodeProProcessor::settingsFromParams() const {
     ccp::GenerationSettings s;
-    s.key = (int) *apvts.getRawParameterValue("key");
-    s.scale = (ccp::ScaleType) (int) *apvts.getRawParameterValue("scale");
+    const int keyChoice = (int) *apvts.getRawParameterValue("key");
+    const int scaleChoice = (int) *apvts.getRawParameterValue("scale");
+    s.key = keyChoice >= 12 ? resolvedKey.load() : keyChoice;
+    s.scale = (ccp::ScaleType) (scaleChoice >= (int) ccp::ScaleType::count ? resolvedScale.load() : scaleChoice);
     s.style = (ccp::Style) (int) *apvts.getRawParameterValue("style");
     s.mood = (ccp::Mood) (int) *apvts.getRawParameterValue("mood");
     s.complexity = (ccp::Complexity) (int) *apvts.getRawParameterValue("complexity");
@@ -137,7 +140,52 @@ void ChordCodeProProcessor::publish(const ccp::Progression& p, bool addHistory) 
     persistProgression();
 }
 
+bool ChordCodeProProcessor::isKeyAutomatic() const { return (int) *apvts.getRawParameterValue("key") >= 12; }
+bool ChordCodeProProcessor::isScaleAutomatic() const { return (int) *apvts.getRawParameterValue("scale") >= (int) ccp::ScaleType::count; }
+
+// AUTOMÁTICO in TOM / ESCALA: a new tom and a scale that suits the style and the vibe on every GERAR (a locked option keeps its value).
+void ChordCodeProProcessor::rollAutomatic(bool force) {
+    auto& r = juce::Random::getSystemRandom();
+    if (isKeyAutomatic() && (force || !isOptionLocked(0))) resolvedKey.store(r.nextInt(12));
+    if (isScaleAutomatic() && (force || !isOptionLocked(1))) {
+        using S = ccp::ScaleType;
+        const auto mood = (ccp::Mood) (int) *apvts.getRawParameterValue("mood");
+        const auto style = (ccp::Style) (int) *apvts.getRawParameterValue("style");
+        std::vector<std::pair<S, int>> w { { S::major, 6 }, { S::naturalMinor, 7 }, { S::dorian, 2 }, { S::harmonicMinor, 1 }, { S::mixolydian, 1 }, { S::lydian, 1 } };
+        auto add = [&](S sc, int v) { for (auto& x : w) if (x.first == sc) { x.second += v; return; } w.push_back({ sc, v }); };
+        switch (mood) {
+            case ccp::Mood::dark: case ccp::Mood::tense: case ccp::Mood::aggressive: case ccp::Mood::mysterious:
+                add(S::naturalMinor, 6); add(S::harmonicMinor, 5); add(S::phrygian, 4); add(S::major, -6); break;
+            case ccp::Mood::melancholic: case ccp::Mood::emotional: case ccp::Mood::nostalgic: add(S::naturalMinor, 6); add(S::dorian, 3); add(S::major, -2); break;
+            case ccp::Mood::fun: case ccp::Mood::hopeful: add(S::major, 8); add(S::mixolydian, 2); add(S::naturalMinor, -5); break;
+            case ccp::Mood::atmospheric: case ccp::Mood::romantic: add(S::lydian, 3); add(S::dorian, 3); add(S::major, 2); break;
+            case ccp::Mood::epic: add(S::naturalMinor, 4); add(S::harmonicMinor, 3); break;
+            default: break;
+        }
+        switch (style) {
+            case ccp::Style::trap: case ccp::Style::phonk: add(S::naturalMinor, 6); add(S::harmonicMinor, 4); add(S::phrygian, 3); add(S::major, -5); break;
+            case ccp::Style::jazz: case ccp::Style::rnb: case ccp::Style::loFi: add(S::dorian, 4); add(S::major, 2); break;
+            case ccp::Style::funkBrasileiro: case ccp::Style::latin: add(S::naturalMinor, 3); add(S::phrygianDominant, 2); break;
+            case ccp::Style::pop: case ccp::Style::house: case ccp::Style::edm: add(S::major, 3); break;
+            default: break;
+        }
+        int total = 0; for (auto& x : w) total += juce::jmax(0, x.second);
+        int pick = r.nextInt(juce::jmax(1, total));
+        for (auto& x : w) { pick -= juce::jmax(0, x.second); if (pick < 0) { resolvedScale.store((int) x.first); break; } }
+    }
+}
+
+void ChordCodeProProcessor::toggleOptionLock(int i) {
+    if (i < 0 || i >= optionCount) return;
+    optionLocks[(size_t) i].store(!optionLocks[(size_t) i].load());
+    juce::String t; for (auto& l : optionLocks) t << (l.load() ? "1" : "0");
+    apvts.state.setProperty("optionLocks", t, nullptr);
+}
+
+bool ChordCodeProProcessor::isOptionLocked(int i) const { return i >= 0 && i < optionCount && optionLocks[(size_t) i].load(); }
+
 void ChordCodeProProcessor::generate() {
+    rollAutomatic(false);
     const auto current = getProgression();
     publish(generator.generate(settingsFromParams(), &current, lockSnapshot(), current.chordCount));
 }
@@ -198,7 +246,7 @@ std::vector<ccp::Chord> ChordCodeProProcessor::chordChoices(int position) const 
         for (int kind = 0; kind < (int) ccp::ChordKind::count; ++kind) {
             auto candidate = ccp::HarmonyEngine::buildChord(
                 progression.settings, degree, (ccp::ChordKind) kind, previous, position);
-            if (candidate.noteCount >= 3 && candidate.noteCount <= 5 && !candidate.name.empty())
+            if (candidate.noteCount >= 3 && candidate.noteCount <= ccp::maxNotes && !candidate.name.empty())
                 choices.push_back(std::move(candidate));
         }
     }
@@ -243,6 +291,7 @@ void ChordCodeProProcessor::auditionChord(int position, const ccp::Chord& chord)
 }
 
 void ChordCodeProProcessor::setKey(int k) {
+    if (k >= 12) { rollAutomatic(true); k = resolvedKey.load(); }
     publish(ccp::HarmonyEngine::transpose(getProgression(), juce::jlimit(0, 11, k)));
 }
 
@@ -258,12 +307,13 @@ void ChordCodeProProcessor::setChoice(const char* id, int value) {
 
 void ChordCodeProProcessor::randomize() {
     auto& r = juce::Random::getSystemRandom();
-    setChoice("key", r.nextInt(12));
-    setChoice("scale", r.nextInt((int) ccp::ScaleType::count));
-    setChoice("style", r.nextInt((int) ccp::Style::count));
-    setChoice("mood", r.nextInt((int) ccp::Mood::count));
-    setChoice("complexity", r.nextInt((int) ccp::Complexity::count));
-    setChoice("tension", r.nextInt((int) ccp::Tension::count));
+    // a locked option (cadeado) keeps its value; TOM / ESCALA on AUTOMÁTICO stay automatic and roll in generate()
+    if (!isOptionLocked(0) && !isKeyAutomatic()) setChoice("key", r.nextInt(12));
+    if (!isOptionLocked(1) && !isScaleAutomatic()) setChoice("scale", r.nextInt((int) ccp::ScaleType::count));
+    if (!isOptionLocked(2)) setChoice("style", r.nextInt((int) ccp::Style::count));
+    if (!isOptionLocked(3)) setChoice("mood", r.nextInt((int) ccp::Mood::count));
+    if (!isOptionLocked(4)) setChoice("complexity", r.nextInt((int) ccp::Complexity::count));
+    if (!isOptionLocked(5)) setChoice("tension", r.nextInt((int) ccp::Tension::count));
     generate(); // Timbre, voicing, rhythm and length intentionally remain unchanged.
 }
 
@@ -283,8 +333,8 @@ bool ChordCodeProProcessor::restoreHistory(int index) {
     auto selected = history[(size_t) index];
     history.erase(history.begin() + index);
     const auto& s = selected.progression.settings;
-    setChoice("key", s.key);
-    setChoice("scale", (int) s.scale);
+    if (isKeyAutomatic()) resolvedKey.store(s.key); else setChoice("key", s.key);
+    if (isScaleAutomatic()) resolvedScale.store((int) s.scale); else setChoice("scale", (int) s.scale);
     setChoice("style", (int) s.style);
     setChoice("mood", (int) s.mood);
     setChoice("complexity", (int) s.complexity);
@@ -329,28 +379,15 @@ void ChordCodeProProcessor::scheduleChord(juce::MidiBuffer& m, const ccp::Chord&
                                           double sampleRate) {
     const int volume = juce::jlimit(0, 100, (int) *apvts.getRawParameterValue("velocity"));
     const int baseVelocity = juce::jlimit(1, 127, juce::roundToInt((float) volume * 1.27f));
-    for (int i = 0; i < c.noteCount; ++i) {
-        const int note = juce::jlimit(0, 127, c.notes[(size_t) i]);
-        int64_t offset = 0;
-        int velocity = baseVelocity;
-        if (rhythm == ccp::MidiRhythm::humanize) {
-            offset = (int64_t) std::llround(sampleRate * (0.012 + 0.003 * (double) ((chordIndex * 17 + i * 23) % 11)));
-            velocity = juce::jlimit(1, 127, velocity + ((chordIndex * 11 + i * 7) % 13) - 6);
-        } else if (rhythm == ccp::MidiRhythm::strum) {
-            offset = (int64_t) std::llround(sampleRate * 0.027 * (double) i);
-        } else if (rhythm == ccp::MidiRhythm::arpeggio) {
-            offset = i * juce::jmax<int64_t>(1, chordDuration / juce::jmax(1, c.noteCount));
-        }
-        offset = juce::jmin(offset, juce::jmax<int64_t>(0, chordDuration - 2));
-        const int64_t noteOn = chordStart + offset;
-        int64_t noteOff = chordStart + chordDuration - 1;
-        if (rhythm == ccp::MidiRhythm::arpeggio) {
-            const int64_t step = juce::jmax<int64_t>(1, chordDuration / juce::jmax(1, c.noteCount));
-            noteOff = juce::jmin(noteOff, noteOn + juce::jmax<int64_t>(1, step * 4 / 5));
-        }
+    const double samplesPerBeat = sampleRate * 60.0 / juce::jmax(20.0, hostBpm());
+    const double lengthBeats = (double) chordDuration / samplesPerBeat;
+    for (const auto& n : ccp::arrangeChord(c, rhythm, lengthBeats, chordIndex, baseVelocity)) {
+        const int note = juce::jlimit(0, 127, n.note);
+        const int64_t noteOn = chordStart + (int64_t) std::llround(n.start * samplesPerBeat);
+        const int64_t noteOff = juce::jmin(chordStart + chordDuration - 1, chordStart + (int64_t) std::llround((n.start + n.length) * samplesPerBeat));
         if (noteOn >= blockStart && noteOn < blockEnd)
-            m.addEvent(juce::MidiMessage::noteOn(1, note, (juce::uint8) velocity), (int) (noteOn - blockStart));
-        if (noteOff >= blockStart && noteOff < blockEnd)
+            m.addEvent(juce::MidiMessage::noteOn(1, note, (juce::uint8) n.velocity), (int) (noteOn - blockStart));
+        if (noteOff >= blockStart && noteOff < blockEnd && noteOff > noteOn)
             m.addEvent(juce::MidiMessage::noteOff(1, note), (int) (noteOff - blockStart));
     }
 }
@@ -475,6 +512,7 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
         }
     }
 
+    synth.setTempo(hostBpm());
     synth.render(b, events);
     const float volume = juce::jlimit(0.0f, 1.0f, *apvts.getRawParameterValue("velocity") / 100.0f);
     const float targetGain = *apvts.getRawParameterValue("previewGain") * volume;
@@ -503,6 +541,7 @@ bool ChordCodeProProcessor::renderWav(juce::MemoryBlock& destination) {
     PreviewSynth offline;
     offline.prepare(rate, blockSize);
     offline.setTimbre((ccp::Timbre) (int) *apvts.getRawParameterValue("timbre"));
+    offline.setTempo(options.bpm);
     juce::AudioBuffer<float> result(2, (int) loop), chunk(2, blockSize);
     result.clear();
     for (int64_t position = 0; position < loop * 2; position += blockSize) {
@@ -589,8 +628,8 @@ void ChordCodeProProcessor::handleKeyboard(const juce::MidiBuffer& incoming, juc
     }
     const bool chordMode = mode != (int) KeyMode::notes;
     if (chordMode) refreshKeyboardChords();
-    const auto scale = ccp::HarmonyEngine::scaleNotes((int) *apvts.getRawParameterValue("key"),
-                                                      (ccp::ScaleType) (int) *apvts.getRawParameterValue("scale"));
+    const auto resolved = settingsFromParams();
+    const auto scale = ccp::HarmonyEngine::scaleNotes(resolved.key, resolved.scale);
     const bool capturing = captureSlot.load(std::memory_order_relaxed) >= 0;
 
     for (const auto metadata : incoming) {
@@ -764,7 +803,7 @@ bool ChordCodeProProcessor::applyPendingCapture() {
         if (named.quality >= 0) {
             named.name = named.name.substr(0, named.name.find('/'));
             std::sort(notes.begin(), notes.end());
-            named.noteCount = juce::jmin(5, (int) notes.size());
+            named.noteCount = juce::jmin(ccp::maxNotes, (int) notes.size());
             for (int i = 0; i < named.noteCount; ++i) named.notes[(size_t) i] = notes[(size_t) i];
             p.chords[(size_t) slot] = named;
         }
@@ -784,7 +823,7 @@ void ChordCodeProProcessor::audition(int i) { command.store(10 + juce::jlimit(0,
 void ChordCodeProProcessor::persistProgression() {
     const auto p = getProgression();
     juce::String s;
-    s << "3|" << p.chordCount << "," << p.settings.key << "," << (int) p.settings.scale << "," << (int) p.settings.style
+    s << "4|" << p.chordCount << "," << p.settings.key << "," << (int) p.settings.scale << "," << (int) p.settings.style
       << "," << (int) p.settings.mood << "," << (int) p.settings.complexity << "," << (int) p.settings.tension
       << "," << (int) p.settings.voicing << "," << (juce::int64) p.identity << "|";
     for (int i = 0; i < p.chordCount; ++i) {
@@ -823,7 +862,7 @@ bool ChordCodeProProcessor::restoreProgression() {
             if (fields.size() < 7) return false;
             auto& c = migrated.chords[(size_t) i];
             c.degree = fields[0].getIntValue(); c.root = fields[1].getIntValue(); c.kind = (ccp::ChordKind) fields[2].getIntValue();
-            c.noteCount = juce::jlimit(1, 5, fields[3].getIntValue()); c.velocity = fields[4].getIntValue(); c.name = fields[5].toStdString();
+            c.noteCount = juce::jlimit(1, ccp::maxNotes, fields[3].getIntValue()); c.velocity = fields[4].getIntValue(); c.name = fields[5].toStdString();
             const auto notes = juce::StringArray::fromTokens(fields[6], ".", "");
             if (notes.size() != c.noteCount) return false;
             for (int n = 0; n < c.noteCount; ++n) c.notes[(size_t) n] = notes[n].getIntValue();
@@ -835,7 +874,7 @@ bool ChordCodeProProcessor::restoreProgression() {
         return true;
     }
     const auto sections = juce::StringArray::fromTokens(text, "|", "");
-    if (sections.size() != 3 || (sections[0] != "2" && sections[0] != "3"))
+    if (sections.size() != 3 || (sections[0] != "2" && sections[0] != "3" && sections[0] != "4"))
         return false;
     const auto meta = juce::StringArray::fromTokens(sections[1], ",", "");
     if (meta.size() < 9)
@@ -853,6 +892,7 @@ bool ChordCodeProProcessor::restoreProgression() {
         p.settings.mood = (ccp::Mood) meta[4].getIntValue();
     }
     p.settings.complexity = (ccp::Complexity) meta[5].getIntValue();
+    if (sections[0] != "4" && p.settings.complexity == ccp::Complexity::full) p.settings.complexity = ccp::Complexity::automatic;   // was index 3
     p.settings.tension = (ccp::Tension) meta[6].getIntValue();
     p.settings.voicing = (ccp::Voicing) meta[7].getIntValue();
     p.identity = (uint64_t) meta[8].getLargeIntValue();
@@ -866,7 +906,7 @@ bool ChordCodeProProcessor::restoreProgression() {
         c.degree = fields[0].getIntValue();
         c.root = fields[1].getIntValue();
         c.kind = (ccp::ChordKind) fields[2].getIntValue();
-        c.noteCount = juce::jlimit(1, 5, fields[3].getIntValue());
+        c.noteCount = juce::jlimit(1, ccp::maxNotes, fields[3].getIntValue());
         c.velocity = juce::jlimit(1, 127, fields[4].getIntValue());
         c.name = fields[5].toStdString();
         const auto notes = juce::StringArray::fromTokens(fields[6], ".", "");
@@ -880,6 +920,10 @@ bool ChordCodeProProcessor::restoreProgression() {
     activeSlot.store(0);
     setChoice("style", (int) p.settings.style);
     setChoice("mood", (int) p.settings.mood);
+    resolvedKey.store(p.settings.key);
+    resolvedScale.store((int) p.settings.scale);
+    const auto optionText = apvts.state.getProperty("optionLocks").toString();
+    for (int i = 0; i < optionCount; ++i) optionLocks[(size_t) i].store(i < optionText.length() && optionText[i] == '1');
     const auto lockText = apvts.state.getProperty("locksV2").toString();
     for (int i = 0; i < ccp::maxChords; ++i)
         locks[(size_t) i].store(i < lockText.length() && lockText[i] == '1');
@@ -889,7 +933,8 @@ bool ChordCodeProProcessor::restoreProgression() {
 void ChordCodeProProcessor::getStateInformation(juce::MemoryBlock& d) {
     persistProgression();
     if (auto xml = apvts.copyState().createXml()) {
-        xml->setAttribute("timbreOrder", 2);
+        xml->setAttribute("timbreOrder", 3);
+        xml->setAttribute("complexityOrder", 2);
         copyXmlToBinary(*xml, d);
     }
 }
@@ -897,14 +942,23 @@ void ChordCodeProProcessor::getStateInformation(juce::MemoryBlock& d) {
 void ChordCodeProProcessor::setStateInformation(const void* d, int n) {
     if (auto xml = getXmlFromBinary(d, n))
         if (xml->hasTagName(apvts.state.getType())) {
-            // Before 1.3 the timbre menu ended with PIANO; now it starts with it.
-            if (xml->getIntAttribute("timbreOrder", 1) < 2)
-                for (auto* param : xml->getChildWithTagNameIterator("PARAM"))
-                    if (param->getStringAttribute("id") == "timbre") {
-                        const int old = param->getIntAttribute("value");
-                        param->setAttribute("value", (old + 1) % (int) ccp::Timbre::count);
-                    }
+            // Timbres: before 1.3 the menu ended with PIANO; 1.3 had PIANO RHODES SAW ORGAN PAD VIOLINO FLAUTA; 1.4 has the 19 new ones.
+            const int timbreOrder = xml->getIntAttribute("timbreOrder", 1);
+            const int complexityOrder = xml->getIntAttribute("complexityOrder", 1);
+            for (auto* param : xml->getChildWithTagNameIterator("PARAM")) {
+                const auto id = param->getStringAttribute("id");
+                if (id == "timbre" && timbreOrder < 3) {
+                    int old = param->getIntAttribute("value");
+                    if (timbreOrder < 2) old = (old + 1) % 7;
+                    using T = ccp::Timbre;
+                    static constexpr T map[] { T::piano, T::rhodes, T::supersaw, T::organ, T::atmosPad, T::strings, T::piano };
+                    param->setAttribute("value", (int) map[juce::jlimit(0, 6, old)]);
+                }
+                if (id == "complexity" && complexityOrder < 2 && param->getIntAttribute("value") == 3)
+                    param->setAttribute("value", (int) ccp::Complexity::automatic);
+            }
             xml->removeAttribute("timbreOrder");
+            xml->removeAttribute("complexityOrder");
             apvts.replaceState(juce::ValueTree::fromXml(*xml));
             if (!restoreProgression()) {
                 slots[0] = generator.generate(settingsFromParams());

@@ -46,6 +46,14 @@ public:
     void setKey(int);
     void rebuildForSettings();
     void randomize();
+    // Cadeados das opções: TOM, ESCALA, ESTILO, VIBE, COMPLEXIDADE, TENSÃO keep their value on ALEATÓRIO (and on GERAR for AUTOMÁTICO).
+    static constexpr int optionCount = 6;
+    void toggleOptionLock(int);
+    bool isOptionLocked(int) const;
+    bool isKeyAutomatic() const;
+    bool isScaleAutomatic() const;
+    int automaticKey() const { return resolvedKey.load(); }
+    ccp::ScaleType automaticScale() const { return (ccp::ScaleType) resolvedScale.load(); }
     // Renders the progression as REPRODUZIR plays it (timbre, rhythm, duration, volume, tempo)
     // to a 24-bit stereo 44.1 kHz WAV that loops seamlessly: the loop is rendered twice and
     // the second pass is kept, so the last chord's release wraps onto the start.
@@ -100,6 +108,9 @@ private:
     int64_t chordStartSamples(const ccp::MidiOptions&, int index, double rate) const;
     int64_t chordLengthSamples(const ccp::MidiOptions&, int index, double rate) const;
     void setChoice(const char*, int);
+    void rollAutomatic(bool force);
+    std::atomic<int> resolvedKey { 9 }, resolvedScale { 1 };
+    std::array<std::atomic<bool>, optionCount> optionLocks {};
 
     ccp::ProgressionGenerator generator;
     std::array<ccp::Progression, 2> slots {};
@@ -122,10 +133,10 @@ private:
     int currentTimbre { -1 };
 
     // Keyboard chord mode (audio thread only).
-    std::array<std::array<int, 5>, 7> keyboardChords {};
+    std::array<std::array<int, ccp::maxNotes>, 7> keyboardChords {};
     std::array<int, 7> keyboardChordSizes {};
     uint64_t keyboardSettingsHash { ~0ull };
-    std::array<std::array<int, 5>, 128> heldChord {};
+    std::array<std::array<int, ccp::maxNotes>, 128> heldChord {};
     std::array<int, 128> heldChordSize {}, soundingCount {};
     int lastKeyMode { 0 };
 

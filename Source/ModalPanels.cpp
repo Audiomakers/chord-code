@@ -476,28 +476,31 @@ void UpdatePanel::paint(juce::Graphics& g) {
 // ---------------------------------------------------------------------------
 
 LicensePanel::LicensePanel(Mode m, juce::String currentEmail) : mode(m), email(std::move(currentEmail)) {
-    field.setFont(font(15.0f));
-    field.setTextToShowWhenEmpty("seuemail@gmail.com", juce::Colour(textQuiet));
-    field.setIndents(40, 12);
-    field.setJustification(juce::Justification::centredLeft);
-    field.setColour(juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);   // the rounded box is painted by the panel
-    field.setColour(juce::TextEditor::textColourId, juce::Colour(textPrimary));
-    field.setColour(juce::TextEditor::highlightColourId, juce::Colour(orange).withAlpha(0.35f));
-    field.setColour(juce::TextEditor::highlightedTextColourId, juce::Colour(textPrimary));
-    field.setColour(juce::CaretComponent::caretColourId, juce::Colour(orangeLight));
-    field.setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
-    field.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
-    field.setInputRestrictions(254);
+    for (auto* f : { &field, &confirm }) {
+        f->setFont(font(15.0f));
+        f->setTextToShowWhenEmpty(f == &field ? "seuemail@gmail.com" : utf("digite o e-mail de novo"), juce::Colour(textQuiet));
+        f->setIndents(40, 12);
+        f->setJustification(juce::Justification::centredLeft);
+        f->setColour(juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);   // the rounded box is painted by the panel
+        f->setColour(juce::TextEditor::textColourId, juce::Colour(textPrimary));
+        f->setColour(juce::TextEditor::highlightColourId, juce::Colour(orange).withAlpha(0.35f));
+        f->setColour(juce::TextEditor::highlightedTextColourId, juce::Colour(textPrimary));
+        f->setColour(juce::CaretComponent::caretColourId, juce::Colour(orangeLight));
+        f->setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
+        f->setColour(juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
+        f->setInputRestrictions(254);
+        f->onTextChange = [this] { if (failed) { failed = false; message.clear(); } repaint(); };
+        addAndMakeVisible(*f);
+    }
     if (mode == Mode::revoked) field.setText(email, false);
-    field.onReturnKey = [this] { submit(); };
-    field.onTextChange = [this] { if (failed) { failed = false; message.clear(); repaint(); } };
-    addAndMakeVisible(field);
+    field.onReturnKey = [this] { confirm.grabKeyboardFocus(); };
+    confirm.onReturnKey = [this] { submit(); };
     addAndMakeVisible(activate);
     addChildComponent(cancel);
     cancel.setVisible(mode == Mode::change);
     activate.onClick = [this] { submit(); };
     cancel.onClick = [this] { if (onCancel) onCancel(); };
-    setSize(400, 316);
+    setSize(400, 392);
 }
 
 void LicensePanel::visibilityChanged() {
@@ -508,14 +511,22 @@ void LicensePanel::visibilityChanged() {
 
 void LicensePanel::submit() {
     if (busy) return;
+    const auto a = field.getText().trim().toLowerCase(), b = confirm.getText().trim().toLowerCase();
+    if (a.isEmpty() || !a.containsChar('@') || !a.fromFirstOccurrenceOf("@", false, false).containsChar('.')) {
+        failed = true; message = utf("Digite um e-mail válido."); repaint(); return;
+    }
+    if (a != b) {
+        failed = true; message = utf("Os dois e-mails não são iguais. Confira e digite de novo."); repaint(); return;
+    }
     busy = true;
     failed = false;
     message = utf("Verificando sua compra...");
     activate.setEnabled(false);
     activate.setButtonText("VERIFICANDO...");
     field.setReadOnly(true);
+    confirm.setReadOnly(true);
     repaint();
-    if (onSubmit) onSubmit(field.getText());
+    if (onSubmit) onSubmit(field.getText().trim());
 }
 
 void LicensePanel::finish(bool ok, const juce::String& text) {
@@ -525,12 +536,14 @@ void LicensePanel::finish(bool ok, const juce::String& text) {
     activate.setEnabled(true);
     activate.setButtonText("ATIVAR");
     field.setReadOnly(false);
+    confirm.setReadOnly(false);
     repaint();
 }
 
 // Same dialog as Melody Code: key badge, one field, the two buttons the same size with ATIVAR on the right.
 void LicensePanel::resized() {
     field.setBounds(24, 164, getWidth() - 48, AMUI::Size::field);
+    confirm.setBounds(24, 240, getWidth() - 48, AMUI::Size::field);
     auto row = juce::Rectangle<int>(24, getHeight() - 24 - AMUI::Size::button, getWidth() - 48, AMUI::Size::button);
     activate.setBounds(row.removeFromRight(cancel.isVisible() ? 128 : 160));
     if (cancel.isVisible()) { row.removeFromRight(10); cancel.setBounds(row.removeFromRight(128)); }
@@ -572,18 +585,25 @@ void LicensePanel::paint(juce::Graphics& g) {
     g.setColour(juce::Colour(textSecondary));
     g.setFont(labelFont(11.0f));
     g.drawText(utf("E-MAIL DA COMPRA"), 24, 142, 240, 16, juce::Justification::centredLeft);
-    {   // the field's box: focused from the moment the panel opens
-        const auto box = field.getBounds().toFloat();
-        g.setColour(juce::Colour(orange).withAlpha(0.12f));
-        g.drawRoundedRectangle(box.expanded(2.0f), AMUI::Size::radiusControl + 2.0f, 3.0f);
+    g.drawText(utf("CONFIRME O E-MAIL"), 24, 218, 240, 16, juce::Justification::centredLeft);
+    const bool matches = confirm.getText().isNotEmpty() && confirm.getText().trim().equalsIgnoreCase(field.getText().trim());
+    for (auto* f : { &field, &confirm }) {   // the boxes: the focused one glows; the confirmation turns green when it matches
+        const auto box = f->getBounds().toFloat();
+        const bool focused = f == &field ? confirm.isEmpty() : !confirm.isEmpty();
+        if (focused) {
+            g.setColour(juce::Colour(orange).withAlpha(0.12f));
+            g.drawRoundedRectangle(box.expanded(2.0f), AMUI::Size::radiusControl + 2.0f, 3.0f);
+        }
         g.setColour(juce::Colour(background));
         g.fillRoundedRectangle(box, AMUI::Size::radiusControl);
-        g.setColour(juce::Colour(orange).withAlpha(0.8f));
+        const auto edge = f == &confirm && matches ? juce::Colour(0xff4ade80) : juce::Colour(orange).withAlpha(focused ? 0.8f : 0.35f);
+        g.setColour(edge);
         g.drawRoundedRectangle(box.reduced(0.5f), AMUI::Size::radiusControl, 1.0f);
-        AMUI::drawIcon(g, AMUI::Icon::mail, { box.getX() + 14.0f, box.getCentreY() - 8.0f, 16.0f, 16.0f }, juce::Colour(orangeLight));
+        AMUI::drawIcon(g, f == &confirm && matches ? AMUI::Icon::check : AMUI::Icon::mail,
+                       { box.getX() + 14.0f, box.getCentreY() - 8.0f, 16.0f, 16.0f }, f == &confirm && matches ? juce::Colour(0xff4ade80) : juce::Colour(orangeLight));
     }
     g.setColour(message.isNotEmpty() ? (failed ? juce::Colour(danger) : juce::Colour(textSecondary)) : juce::Colour(textQuiet));
     g.setFont(font(12.5f));
     g.drawFittedText(message.isNotEmpty() ? message : utf("Verificação só na primeira vez; depois funciona offline."),
-                     24, 214, getWidth() - 48, 30, juce::Justification::topLeft, 2, 1.0f);
+                     24, 290, getWidth() - 48, 30, juce::Justification::topLeft, 2, 1.0f);
 }

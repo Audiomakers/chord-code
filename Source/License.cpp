@@ -2,7 +2,11 @@
 #include <array>
 
 namespace {
-constexpr auto endpoint = "https://download.chordcode.audiomakers.club/api/license/check";
+// Área de membros (D1 audiomakers-members-prod) first; the original download worker stays as a fallback so
+// buyers who are only in the old Yampi list keep access. Access is denied only when every server that
+// answered says no and none of them failed.
+constexpr const char* endpoints[] { "https://licencas.audiomakers.club/api/license/check",
+                                    "https://download.chordcode.audiomakers.club/api/license/check" };
 constexpr int maximumResponseBytes = 16 * 1024;
 const auto revalidateInterval = juce::RelativeTime::minutes(10);
 
@@ -33,10 +37,9 @@ public:
     Request(juce::WeakReference<LicenseManager> o, juce::String e, std::function<void(Outcome)> c)
         : juce::ThreadPoolJob("License check"), owner(std::move(o)), email(std::move(e)), completion(std::move(c)) {}
 
-    JobStatus runJob() override {
-        Outcome outcome { Outcome::Kind::unavailable,
-                          utf("Não foi possível falar com o servidor. Confira sua conexão e tente novamente.") };
+    enum class Answer { authorized, denied, badEmail, unavailable };
 
+    Answer ask(const char* endpoint) {
         auto body = std::make_unique<juce::DynamicObject>();
         body->setProperty("email", email);
         body->setProperty("product", "chord-code-pro");
@@ -47,27 +50,44 @@ public:
         stream.withConnectionTimeout(8000).withNumRedirectsToFollow(0)
               .withExtraHeaders("Content-Type: application/json\r\nAccept: application/json\r\nUser-Agent: Chord-Code/"
                                 JucePlugin_VersionString "\r\n");
-        if (stream.connect(nullptr) && !shouldExit()) {
-            const int code = stream.getStatusCode();
-            juce::MemoryOutputStream output;
-            std::array<char, 2048> buffer {};
-            while (!shouldExit() && !stream.isExhausted() && output.getDataSize() <= maximumResponseBytes) {
-                const int read = stream.read(buffer.data(), (int) buffer.size());
-                if (read <= 0) break;
-                output.write(buffer.data(), (size_t) read);
+        if (!stream.connect(nullptr) || shouldExit()) return Answer::unavailable;
+        const int code = stream.getStatusCode();
+        juce::MemoryOutputStream output;
+        std::array<char, 2048> buffer {};
+        while (!shouldExit() && !stream.isExhausted() && output.getDataSize() <= maximumResponseBytes) {
+            const int read = stream.read(buffer.data(), (int) buffer.size());
+            if (read <= 0) break;
+            output.write(buffer.data(), (size_t) read);
+        }
+        const auto json = juce::JSON::parse(output.toString());
+        auto* object = json.getDynamicObject();
+        // Only a well-formed 200 answer can grant or revoke access.
+        if (code == 200 && object != nullptr && object->hasProperty("authorized"))
+            return (bool) object->getProperty("authorized") ? Answer::authorized : Answer::denied;
+        return code == 400 ? Answer::badEmail : Answer::unavailable;
+    }
+
+    JobStatus runJob() override {
+        Outcome outcome { Outcome::Kind::unavailable,
+                          utf("Não foi possível falar com o servidor. Confira sua conexão e tente novamente.") };
+        bool denied = false, failed = false, badEmail = false;
+        for (auto* endpoint : endpoints) {
+            if (shouldExit()) break;
+            const auto answer = ask(endpoint);
+            if (answer == Answer::authorized) {
+                outcome = { Outcome::Kind::authorized, utf("Licença ativada.") };
+                denied = failed = badEmail = false;
+                break;
             }
-            const auto json = juce::JSON::parse(output.toString());
-            auto* object = json.getDynamicObject();
-            // Only a well-formed 200 answer can grant or revoke access.
-            if (code == 200 && object != nullptr && object->hasProperty("authorized")) {
-                const bool authorized = (bool) object->getProperty("authorized");
-                outcome.kind = authorized ? Outcome::Kind::authorized : Outcome::Kind::denied;
-                outcome.message = authorized ? utf("Licença ativada.")
-                                             : utf("Não encontramos um acesso ativo ao Chord Code para este e-mail. "
-                                                   "Use o mesmo e-mail da compra.");
-            } else if (code == 400) {
-                outcome.message = utf("Digite um e-mail válido.");
-            }
+            denied |= answer == Answer::denied;
+            failed |= answer == Answer::unavailable;
+            badEmail |= answer == Answer::badEmail;
+        }
+        if (denied && !failed) {
+            outcome = { Outcome::Kind::denied, utf("Não encontramos um acesso ativo ao Chord Code para este e-mail. "
+                                                   "Use o mesmo e-mail da compra.") };
+        } else if (badEmail && !denied) {
+            outcome.message = utf("Digite um e-mail válido.");
         }
 
         if (shouldExit()) return jobHasFinished;

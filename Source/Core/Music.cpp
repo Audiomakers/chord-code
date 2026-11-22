@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <functional>
 
 namespace ccp { namespace {
 constexpr const char* noteNames[]{"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
@@ -27,13 +28,78 @@ double transitionScore(int from,int to){static constexpr double t[7][7]={{0,2,2,
 std::array<std::array<int,4>,3> styleTemplates(Style style){switch(style){case Style::pop:return{{{{0,4,5,3}},{{0,5,3,4}},{{5,3,0,4}}}};case Style::trap:return{{{{0,5,2,6}},{{0,6,5,3}},{{5,2,6,0}}}};case Style::hipHop:return{{{{5,3,0,4}},{{0,2,5,3}},{{1,5,3,4}}}};case Style::rnb:return{{{{1,4,0,5}},{{5,1,4,0}},{{3,2,5,1}}}};case Style::edm:return{{{{0,4,5,3}},{{5,3,0,4}},{{0,3,5,4}}}};case Style::house:return{{{{0,5,3,4}},{{5,3,0,4}},{{0,3,4,5}}}};case Style::loFi:return{{{{1,4,0,5}},{{5,3,1,4}},{{0,2,5,3}}}};case Style::phonk:return{{{{0,5,1,4}},{{0,1,5,3}},{{5,0,1,4}}}};case Style::indie:return{{{{0,2,3,5}},{{0,3,2,5}},{{5,3,0,2}}}};case Style::funkBrasileiro:return{{{{0,3,4,5}},{{5,3,0,4}},{{0,4,5,3}}}};case Style::latin:return{{{{0,6,5,4}},{{0,3,4,5}},{{5,3,0,4}}}};case Style::cinematic:return{{{{0,5,1,6}},{{5,3,0,4}},{{0,1,5,6}}}};case Style::jazz:return{{{{1,4,0,5}},{{5,1,4,0}},{{0,5,1,4}}}};default:return{{{{0,4,5,3}},{{0,5,3,4}},{{5,3,0,4}}}};}}
 double sequenceScore(const GenerationSettings&s,const std::array<int,maxChords>&d,int count,const std::array<bool,maxChords>&locked){auto w=degreeWeights(s);double score=0;for(int i=0;i<count;++i){score+=std::log1p(w[(size_t)d[(size_t)i]])*2.2;if(locked[(size_t)i])score+=3; if(i&&d[(size_t)i]==d[(size_t)(i-1)])score-=30;else if(i)score+=transitionScore(d[(size_t)(i-1)],d[(size_t)i]);}for(int base=0;base<count;base+=4){double best=0;for(const auto&t:styleTemplates(s.style)){double q=0;for(int i=0;i<4&&base+i<count;++i){if(d[(size_t)(base+i)]==t[(size_t)i])q+=5;if(i&&d[(size_t)(base+i-1)]==t[(size_t)(i-1)]&&d[(size_t)(base+i)]==t[(size_t)i])q+=3;}best=std::max(best,q);}score+=best;}if(s.style==Style::jazz)for(int i=0;i+2<count;++i)if(d[(size_t)i]==1&&d[(size_t)(i+1)]==4&&d[(size_t)(i+2)]==0)score+=20;return score;}
 using KindWeights=std::array<double,(size_t)ChordKind::count>;
-KindWeights kindWeights(const GenerationSettings&s,int position,int degree){Complexity c=s.complexity;if(c==Complexity::automatic)c=(s.style==Style::rnb||s.style==Style::loFi||s.style==Style::jazz||s.mood==Mood::romantic||s.mood==Mood::mysterious)?Complexity::rich:(s.style==Style::pop||s.style==Style::indie||s.style==Style::cinematic||s.mood==Mood::atmospheric?Complexity::colorful:Complexity::simple);KindWeights w{};if(c==Complexity::simple)w={12,1,.2,2,2,2,.4,1,.1,.1,.1};else if(c==Complexity::colorful)w={4,3,1.5,5,3,3,1.2,3,.4,1.5,.8};else w={1.2,6,6,2.5,1.5,1.5,2.5,2.5,1.5,5,4};auto add=[&](ChordKind k,double v){w[(size_t)k]+=v;};if(s.style==Style::jazz){add(ChordKind::seventh,9);add(ChordKind::ninth,10);add(ChordKind::sixthNinth,7);add(ChordKind::eleventh,6);if(degree==4)add(ChordKind::dominant7,22);}if(s.style==Style::rnb||s.style==Style::loFi){add(ChordKind::seventh,6);add(ChordKind::ninth,8);add(ChordKind::sixthNinth,5);add(ChordKind::eleventh,4);}if(s.style==Style::cinematic||s.style==Style::indie||s.mood==Mood::atmospheric){add(ChordKind::add9,6);add(ChordKind::sus2,5);add(ChordKind::eleventh,4);}if(s.style==Style::latin||s.style==Style::funkBrasileiro||s.mood==Mood::fun){add(ChordKind::sixth,6);add(ChordKind::dominant7,5);add(ChordKind::sus4,3);}if(s.mood==Mood::romantic||s.mood==Mood::emotional){add(ChordKind::seventh,5);add(ChordKind::ninth,5);add(ChordKind::sixthNinth,4);}if(s.mood==Mood::mysterious||s.mood==Mood::tense||s.mood==Mood::dark){add(ChordKind::minorMajor7,degree==0||degree==5?7:3);add(ChordKind::sus2,4);add(ChordKind::dominant7,3);}if(s.tension==Tension::soft){add(ChordKind::sixth,4);add(ChordKind::add9,4);add(ChordKind::sus2,3);}if(s.tension==Tension::medium){add(ChordKind::seventh,5);add(ChordKind::dominant7,5);add(ChordKind::sus4,3);}if(s.tension==Tension::high){add(ChordKind::dominant7,12);add(ChordKind::minorMajor7,10);add(ChordKind::eleventh,8);w[(size_t)ChordKind::triad]*=.25;}if(degree==4&&(position%4==1||position%4==2))add(ChordKind::dominant7,4);return w;}
+KindWeights kindWeights(const GenerationSettings&s,int position,int degree){const Complexity c=HarmonyEngine::resolve(s);KindWeights w{};if(c==Complexity::simple)w={12,1,.2,2,2,2,.4,1,.1,.1,.1};else if(c==Complexity::colorful)w={4,3,1.5,5,3,3,1.2,3,.4,1.5,.8};else if(c==Complexity::rich)w={1.2,6,6,2.5,1.5,1.5,2.5,2.5,1.5,5,4};else w={.3,4,9,3,1,1,2,1.5,1.5,7,6};auto add=[&](ChordKind k,double v){w[(size_t)k]+=v;};if(s.style==Style::jazz){add(ChordKind::seventh,9);add(ChordKind::ninth,10);add(ChordKind::sixthNinth,7);add(ChordKind::eleventh,6);if(degree==4)add(ChordKind::dominant7,22);}if(s.style==Style::rnb||s.style==Style::loFi){add(ChordKind::seventh,6);add(ChordKind::ninth,8);add(ChordKind::sixthNinth,5);add(ChordKind::eleventh,4);}if(s.style==Style::cinematic||s.style==Style::indie||s.mood==Mood::atmospheric){add(ChordKind::add9,6);add(ChordKind::sus2,5);add(ChordKind::eleventh,4);}if(s.style==Style::latin||s.style==Style::funkBrasileiro||s.mood==Mood::fun){add(ChordKind::sixth,6);add(ChordKind::dominant7,5);add(ChordKind::sus4,3);}if(s.mood==Mood::romantic||s.mood==Mood::emotional){add(ChordKind::seventh,5);add(ChordKind::ninth,5);add(ChordKind::sixthNinth,4);}if(s.mood==Mood::mysterious||s.mood==Mood::tense||s.mood==Mood::dark){add(ChordKind::minorMajor7,degree==0||degree==5?7:3);add(ChordKind::sus2,4);add(ChordKind::dominant7,3);}if(s.tension==Tension::soft){add(ChordKind::sixth,4);add(ChordKind::add9,4);add(ChordKind::sus2,3);}if(s.tension==Tension::medium){add(ChordKind::seventh,5);add(ChordKind::dominant7,5);add(ChordKind::sus4,3);}if(s.tension==Tension::high){add(ChordKind::dominant7,12);add(ChordKind::minorMajor7,10);add(ChordKind::eleventh,8);w[(size_t)ChordKind::triad]*=.25;}if(degree==4&&(position%4==1||position%4==2))add(ChordKind::dominant7,4);
+ if(c==Complexity::simple)for(size_t k=1;k<w.size();++k)if(k!=(size_t)ChordKind::sus2&&k!=(size_t)ChordKind::sus4)w[k]*=.08;
+ if(c==Complexity::full)w[(size_t)ChordKind::triad]*=.2;
+ {const auto sc=HarmonyEngine::scaleNotes(s.key,s.scale);const int fifth=wrap(sc[(size_t)((degree+4)%7)]-sc[(size_t)degree]);
+  if(fifth!=7)for(auto k:{ChordKind::sus2,ChordKind::sus4,ChordKind::add9,ChordKind::sixth,ChordKind::sixthNinth,ChordKind::ninth,ChordKind::eleventh})w[(size_t)k]=0;}
+ return w;}
 }
 
 std::vector<int> HarmonyEngine::scaleIntervals(ScaleType s){switch(s){case ScaleType::major:return{0,2,4,5,7,9,11};case ScaleType::naturalMinor:return{0,2,3,5,7,8,10};case ScaleType::harmonicMinor:return{0,2,3,5,7,8,11};case ScaleType::melodicMinor:return{0,2,3,5,7,9,11};case ScaleType::dorian:return{0,2,3,5,7,9,10};case ScaleType::phrygian:return{0,1,3,5,7,8,10};case ScaleType::lydian:return{0,2,4,6,7,9,11};case ScaleType::mixolydian:return{0,2,4,5,7,9,10};case ScaleType::phrygianDominant:return{0,1,4,5,7,8,10};default:return{0,2,4,5,7,9,11};}}
 std::array<int,7> HarmonyEngine::scaleNotes(int key,ScaleType s){auto iv=scaleIntervals(s);std::array<int,7>o{};for(int i=0;i<7;++i)o[(size_t)i]=wrap(key+iv[(size_t)i]);return o;}
-namespace { std::vector<int> voiceChord(const GenerationSettings&s,int root,const std::vector<int>&iv,const Chord*previous,int position){std::vector<int>best;int bestCost=std::numeric_limits<int>::max();for(size_t inv=0;inv<iv.size();++inv){auto r=iv;size_t turns=inv;if(s.voicing==Voicing::inverted)turns=(size_t)(1+position%std::max<int>(1,(int)iv.size()-1));for(size_t i=0;i<turns&&i<r.size();++i)r[i]+=12;std::sort(r.begin(),r.end());if(s.voicing==Voicing::open&&r.size()>=3){r[r.size()-2]+=12;std::sort(r.begin(),r.end());}for(int shift=-24;shift<=24;shift+=12){std::vector<int>c;for(int x:r)c.push_back(48+root+x+shift);if(c.front()<36||c.back()>96)continue;int cost=nearestCost(c,previous);if(s.voicing==Voicing::closed&&c.back()-c.front()>12)cost+=80;if(s.voicing==Voicing::open&&c.back()-c.front()<17)cost+=30;if(cost<bestCost){best=c;bestCost=cost;}}if(s.voicing==Voicing::inverted||s.voicing==Voicing::open)break;}return best;} }
-Chord HarmonyEngine::buildChord(const GenerationSettings&s,int degree,ChordKind kind,const Chord*previous,int position){degree=(degree%7+7)%7;auto scale=scaleNotes(s.key,s.scale);auto iv=chordIntervals(scale,degree,kind);const int root=scale[(size_t)degree];auto best=voiceChord(s,root,iv,previous,position);Chord out;out.degree=degree;out.root=root;out.kind=kind;out.noteCount=(int)std::min<size_t>(5,best.size());for(int i=0;i<out.noteCount;++i)out.notes[(size_t)i]=best[(size_t)i];out.name=chordName(root,iv,kind);out.velocity=(s.mood==Mood::atmospheric||s.voicing==Voicing::open)?82:88;return out;}
+namespace {
+// ---- Voicing (rebuilt 22/11): a bass note on its own, then an upper structure that is spread like a
+// keyboard player would: no mud low down, extensions on top, smooth inner voices and a singing top line.
+struct Tone { int pc; int interval; int role; };   // role: 0 root, 1 third, 2 fifth, 3 seventh/sixth, 4 extension
+int roleOf(int interval){const int i=interval%12;if(interval==0)return 0;if(interval>=13&&interval!=19)return 4;if(i==3||i==4||i==2&&interval<12||i==5&&interval<12)return 1;if(i==7||i==6||i==8)return 2;if(i==9||i==10||i==11)return 3;return 4;}
+std::vector<int> upperOf(const Chord*p){std::vector<int>u;if(!p)return u;for(int i=1;i<p->noteCount;++i)if(p->notes[(size_t)i]>=50)u.push_back(p->notes[(size_t)i]);if(u.empty())for(int i=0;i<p->noteCount;++i)u.push_back(p->notes[(size_t)i]);return u;}
+std::vector<int> voiceChord(const GenerationSettings&s,int root,const std::vector<int>&iv,const Chord*previous,int position){
+ const Complexity cx=HarmonyEngine::resolve(s);
+ // bass: the root (INVERTER walks through the third and the fifth), in E1..D#2 for the full sound, F#1.. for the rest
+ int bassInterval=0;
+ if(s.voicing==Voicing::inverted&&iv.size()>=3){const int pick=1+position%2;bassInterval=iv[(size_t)std::min<int>(pick,(int)iv.size()-1)]%12;}
+ const int bassPc=wrap(root+bassInterval);
+ int bass=36+bassPc;if(bass<40)bass+=12;   // 40..51 (E2..D#3)
+ if(cx==Complexity::full&&bass-12>=36)bass-=12;
+ if(previous&&previous->noteCount>0){const int pb=previous->notes[0];if(bass-pb>7&&bass-12>=36)bass-=12;else if(pb-bass>7&&bass+12<=52)bass+=12;}
+ // upper tones: everything but a plain root when the chord has colour (the bass has it), no fifth when crowded
+ std::vector<Tone>tones;for(int x:iv)tones.push_back({wrap(root+x),x,roleOf(x)});
+ const bool coloured=iv.size()>=4;
+ std::vector<Tone>upper;
+ for(const auto&t:tones){if(t.role==0&&coloured&&cx!=Complexity::full)continue;if(t.role==2&&iv.size()>=5&&cx!=Complexity::full&&t.interval==7)continue;upper.push_back(t);}
+ if(s.voicing==Voicing::inverted){bool hasRoot=false;for(auto&t:upper)hasRoot|=t.role==0;if(!hasRoot)upper.push_back({wrap(root),0,0});}
+ if(upper.size()<3)for(const auto&t:tones){bool have=false;for(auto&u:upper)have|=u.pc==t.pc;if(!have)upper.push_back(t);if(upper.size()>=3)break;}
+ const int n=(int)upper.size();
+ // targets per voicing / complexity
+ double spanTarget=cx==Complexity::simple?9:13,centre=64;int lo=50,hi=84;
+ if(s.voicing==Voicing::closed){spanTarget=std::min(spanTarget,10.0);}
+ if(s.voicing==Voicing::open){spanTarget=20;hi=88;}
+ if(cx==Complexity::full){spanTarget=std::max(spanTarget,19.0);hi=88;centre=66;}
+ const auto prev=upperOf(previous);int prevTop=prev.empty()?0:*std::max_element(prev.begin(),prev.end());
+ std::vector<int>best;double bestCost=1e18;std::vector<int>cur((size_t)n);
+ // every tone in each octave that lands inside [lo,hi]
+ std::vector<std::vector<int>>choices((size_t)n);for(int i=0;i<n;++i)for(int o=36;o<=hi;o+=12){const int note=o+upper[(size_t)i].pc;if(note>=lo&&note<=hi)choices[(size_t)i].push_back(note);}
+ std::function<void(int)>walk=[&](int i){
+  if(i==n){std::vector<int>v=cur;std::sort(v.begin(),v.end());for(size_t k=1;k<v.size();++k)if(v[k]==v[k-1])return;
+   double c=0;const int span=v.back()-v.front();c+=std::abs(span-spanTarget)*1.4;if(s.voicing==Voicing::closed&&span>12)c+=60;
+   double mean=0;for(int x:v)mean+=x;mean/=v.size();if(prev.empty())c+=std::abs(mean-centre)*1.2;else c+=std::abs(mean-centre)*.35;
+   for(size_t k=1;k<v.size();++k){const int gap=v[k]-v[k-1];if(gap==1)c+=v[k]<72?22:9;if(gap<=2&&v[k-1]<57)c+=14;if(gap>9)c+=(gap-9)*2.5;}
+   if(v.front()<bass+7)c+=25;if(v.front()-bass>22)c+=(v.front()-bass-22)*1.5;
+   // extensions above the guide tones, the third not doubled-on-top by a b9 below it
+   int lowest=v.front();for(int k=0;k<n;++k)if(cur[(size_t)k]==lowest&&upper[(size_t)k].role==4)c+=9;
+   int topRole=0;for(int k=0;k<n;++k)if(cur[(size_t)k]==v.back())topRole=upper[(size_t)k].role;if(topRole==0&&coloured)c+=3;
+   // voice leading: inner movement and a smooth top line, keeping common tones
+   if(!prev.empty()){for(int x:v){int bestD=99;for(int y:prev)bestD=std::min(bestD,std::abs(x-y));c+=bestD*.9;}const int topMove=std::abs(v.back()-prevTop);c+=topMove>5?(topMove-5)*2.0+2.5:topMove*.5;}
+   if(c<bestCost){bestCost=c;best=v;}return;}
+  for(int note:choices[(size_t)i]){cur[(size_t)i]=note;walk(i+1);}};
+ walk(0);
+ if(best.empty()){for(const auto&t:upper)best.push_back(60+t.pc);std::sort(best.begin(),best.end());}
+ std::vector<int>out{bass};
+ if(cx==Complexity::full){
+  // low octave and fifth under the hands (only where it stays clear), and a high doubling on top
+  const int oct=bass+12,fifth=bass+19;
+  if(oct<best.front()-2)out.push_back(oct);
+  if(bassInterval==0&&fifth<best.front()-2&&fifth>=55)out.push_back(fifth);
+  int topDouble=-1;
+  for(const auto&t:tones)if(t.role==0||t.role==2){int note=best.back();while(wrap(note)!=t.pc||note<=best.back()+2)++note;if(note<=91){topDouble=note;break;}}
+  for(int x:best)out.push_back(x);if(topDouble>0)out.push_back(topDouble);
+ } else for(int x:best)out.push_back(x);
+ std::sort(out.begin(),out.end());out.erase(std::unique(out.begin(),out.end()),out.end());
+ if((int)out.size()>maxNotes)out.resize((size_t)maxNotes);
+ return out;}
+ }
+Chord HarmonyEngine::buildChord(const GenerationSettings&s,int degree,ChordKind kind,const Chord*previous,int position){degree=(degree%7+7)%7;auto scale=scaleNotes(s.key,s.scale);{const int fifth=wrap(scale[(size_t)((degree+4)%7)]-scale[(size_t)degree]);if(fifth!=7){const bool dim=fifth==6;if(kind==ChordKind::sus2||kind==ChordKind::sus4||kind==ChordKind::add9||kind==ChordKind::sixth)kind=ChordKind::triad;else if(kind==ChordKind::sixthNinth||kind==ChordKind::ninth||kind==ChordKind::eleventh)kind=dim?ChordKind::seventh:ChordKind::triad;}}auto iv=chordIntervals(scale,degree,kind);const int root=scale[(size_t)degree];auto best=voiceChord(s,root,iv,previous,position);Chord out;out.degree=degree;out.root=root;out.kind=kind;out.noteCount=(int)std::min<size_t>(maxNotes,best.size());for(int i=0;i<out.noteCount;++i)out.notes[(size_t)i]=best[(size_t)i];out.name=chordName(root,iv,kind);if(s.voicing==Voicing::inverted&&out.noteCount&&wrap(out.notes[0])!=root)out.name+=std::string("/")+noteNames[wrap(out.notes[0])];out.velocity=(s.mood==Mood::atmospheric||s.voicing==Voicing::open)?82:88;return out;}
 namespace {
 struct ChromaticQuality { const char* suffix; std::vector<int> intervals; };
 const std::array<ChromaticQuality,chromaticQualityCount>& chromaticQualities(){
@@ -50,14 +116,15 @@ Chord HarmonyEngine::buildChromaticChord(const GenerationSettings&s,int root,int
  // Nearest scale degree at or below the root, so degree-based logic keeps working.
  for(int d=0;d<7;++d)if(wrap(root-scale[(size_t)d])<wrap(root-scale[(size_t)degree]))degree=d;
  auto best=voiceChord(s,root,q.intervals,previous,position);Chord out;out.degree=degree;out.root=root;out.kind=ChordKind::triad;out.quality=quality;
- out.noteCount=(int)std::min<size_t>(5,best.size());for(int i=0;i<out.noteCount;++i)out.notes[(size_t)i]=best[(size_t)i];
- out.name=std::string(noteNames[root])+q.suffix;out.velocity=(s.mood==Mood::atmospheric||s.voicing==Voicing::open)?82:88;return out;
+ out.noteCount=(int)std::min<size_t>(maxNotes,best.size());for(int i=0;i<out.noteCount;++i)out.notes[(size_t)i]=best[(size_t)i];
+ out.name=std::string(noteNames[root])+q.suffix;if(s.voicing==Voicing::inverted&&out.noteCount&&wrap(out.notes[0])!=root)out.name+=std::string("/")+noteNames[wrap(out.notes[0])];out.velocity=(s.mood==Mood::atmospheric||s.voicing==Voicing::open)?82:88;return out;
 }
 Chord HarmonyEngine::rebuild(const GenerationSettings&s,const Chord&c,const Chord*previous,int position){
  return c.quality>=0?buildChromaticChord(s,c.root,c.quality,previous,position):buildChord(s,c.degree,c.kind,previous,position);
 }
+Complexity HarmonyEngine::resolve(const GenerationSettings&s){if(s.complexity!=Complexity::automatic)return s.complexity;if(s.style==Style::rnb||s.style==Style::loFi||s.style==Style::jazz||s.mood==Mood::romantic||s.mood==Mood::mysterious)return Complexity::rich;if(s.style==Style::pop||s.style==Style::indie||s.style==Style::cinematic||s.mood==Mood::atmospheric||s.mood==Mood::emotional)return Complexity::colorful;return Complexity::simple;}
 Progression HarmonyEngine::transpose(const Progression&p,int newKey){Progression o=p;o.settings.key=wrap(newKey);const Chord*prev=nullptr;for(int i=0;i<o.chordCount;++i){auto c=p.chords[(size_t)i];c.root=wrap(c.root+o.settings.key-p.settings.key);o.chords[(size_t)i]=rebuild(o.settings,c,prev,i);prev=&o.chords[(size_t)i];}return o;}
-bool HarmonyEngine::valid(const Progression&p){if(p.chordCount!=2&&p.chordCount!=4&&p.chordCount!=8)return false;for(int ci=0;ci<p.chordCount;++ci){const auto&c=p.chords[(size_t)ci];if(c.noteCount<3||c.noteCount>5||!nameMatches(c))return false;for(int i=0;i<c.noteCount;++i)if(c.notes[(size_t)i]<0||c.notes[(size_t)i]>127||(i&&c.notes[(size_t)i]<=c.notes[(size_t)(i-1)]))return false;}return true;}
+bool HarmonyEngine::valid(const Progression&p){if(p.chordCount!=2&&p.chordCount!=4&&p.chordCount!=8)return false;for(int ci=0;ci<p.chordCount;++ci){const auto&c=p.chords[(size_t)ci];if(c.noteCount<3||c.noteCount>maxNotes||!nameMatches(c))return false;for(int i=0;i<c.noteCount;++i)if(c.notes[(size_t)i]<0||c.notes[(size_t)i]>127||(i&&c.notes[(size_t)i]<=c.notes[(size_t)(i-1)]))return false;}return true;}
 bool HarmonyEngine::nameMatches(const Chord&c){return!c.name.empty();}int HarmonyEngine::movement(const Chord&a,const Chord&b){int total=0;for(int i=0;i<b.noteCount;++i){int best=99;for(int j=0;j<a.noteCount;++j)best=std::min(best,std::abs(b.notes[(size_t)i]-a.notes[(size_t)j]));total+=best;}return total;}
 ProgressionGenerator::ProgressionGenerator(uint32_t seed):rng(seed){}uint64_t ProgressionGenerator::nextIdentity(){return counter++;}
 ChordKind ProgressionGenerator::chooseKind(const GenerationSettings&s,int position,int degree){auto w=kindWeights(s,position,degree);std::discrete_distribution<int>d(w.begin(),w.end());return(ChordKind)d(rng);}
@@ -73,8 +140,8 @@ Progression ProgressionGenerator::regenerateChord(const Progression&p,int index)
 const char* scaleName(ScaleType x){static const char*n[]{"MAIOR","MENOR NATURAL","MENOR HARMÔNICA","MENOR MELÓDICA","DÓRICA","FRÍGIA","LÍDIA","MIXOLÍDIA","FRÍGIA DOMINANTE"};return n[(int)x];}
 const char* styleName(Style x){static const char*n[]{"PADRÃO","POP","TRAP","HIP-HOP","R&B","EDM","HOUSE","LO-FI","PHONK","INDIE","FUNK BRASILEIRO","LATIN","CINEMATIC","JAZZ"};return n[(int)x];}
 const char* moodName(Mood x){static const char*n[]{"PADRÃO","MELANCÓLICO","EMOCIONAL","ATMOSFÉRICO","DIVERTIDO","SOMBRIO","ROMÂNTICO","NOSTÁLGICO","ESPERANÇOSO","MISTERIOSO","TENSO","ÉPICO","AGRESSIVO"};return n[(int)x];}
-const char* complexityName(Complexity x){static const char*n[]{"SIMPLES","COLORIDO","RICO","AUTOMÁTICO"};return n[(int)x];}
+const char* complexityName(Complexity x){static const char*n[]{"SIMPLES","COLORIDO","RICO","MUITO RICO","AUTOMÁTICO"};return n[(int)x];}
 const char* tensionName(Tension x){static const char*n[]{"PADRÃO","SUAVE","MÉDIA","ALTA"};return n[(int)x];}
 const char* voicingName(Voicing x){static const char*n[]{"PADRÃO","FECHADO","ABERTO","INVERTER"};return n[(int)x];}
-const char* timbreName(Timbre x){static const char*n[]{"PIANO","RHODES","SAW","ORGAN","PAD ATMOSFÉRICO","VIOLINO","FLAUTA"};return n[(int)x];}
+const char* timbreName(Timbre x){static const char*n[]{"PIANO","PIANO CINEMA","PIANO LO-FI","RHODES","RHODES SUITCASE","WURLITZER","PIANO FM 80s","VIBRAFONE","ÓRGÃO HOUSE","ÓRGÃO","CORDAS","ORQUESTRA","METAIS","PAD ESCURO","PAD JUNO","PAD ATMOSFERA","SYNTHWAVE","SUPERSAW","SAW STAB"};return n[(int)x];}
 }

@@ -55,8 +55,6 @@ public:
     void setAvailable(bool value) { if (available != value) { available = value; repaint(); } }
     // Waiting for a chord from the MIDI keyboard.
     void setArmed(bool value) { if (armed != value) { armed = value; repaint(); } }
-    // Mini piano with the chord's notes in place of the equalizer.
-    void setShowPiano(bool value) { if (showPiano != value) { showPiano = value; repaint(); } }
     void setPlaybackPhase(float value) { playbackPhase = value; if (playing) repaint(); }
     // Eases hover and playback highlights; called from the editor's animation timer.
     void advanceAnimation();
@@ -76,10 +74,16 @@ private:
     juce::Rectangle<float> lockArea() const;
     juce::Rectangle<float> recordArea() const;
     int slot {}, keyRoot {};
-    bool locked {}, selected {}, playing {}, hover {}, available { true }, armed {}, showPiano {};
-    void paintPiano(juce::Graphics&, juce::Rectangle<float>) const;
+    bool locked {}, selected {}, playing {}, hover {}, available { true }, armed {};
     float playbackPhase {}, hoverLevel {}, activeLevel {};
     ccp::Chord chord;
+};
+
+// Small cadeado next to an option's label: locked options keep their value on ALEATÓRIO.
+class OptionLockButton final : public juce::Button {
+public:
+    OptionLockButton() : juce::Button("lock") {}
+    void paintButton(juce::Graphics&, bool highlighted, bool down) override;
 };
 
 class ContinueCard final : public juce::Button {
@@ -119,12 +123,13 @@ private:
     bool on {};
 };
 
-class ChordCodeProEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::ChangeListener {
+class ChordCodeProEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::ChangeListener, private juce::ScrollBar::Listener {
 public:
     explicit ChordCodeProEditor(ChordCodeProProcessor&);
     ~ChordCodeProEditor() override;
     void paint(juce::Graphics&) override;
     void resized() override;
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
     void timerCallback() override;
@@ -161,13 +166,16 @@ private:
     juce::Component content;
     juce::Component cardsViewport;
     juce::ComboBox key, scale, style, mood, complexity, tension, timbre, voicingParameter, rhythmParameter, length, groove;
-    HeaderPill keyModePill { HeaderPill::Icon::keyboard }, beatPill { HeaderPill::Icon::drum }, pianoPill { HeaderPill::Icon::piano };
-    bool showPiano { true };
-    void setShowPiano(bool);
+    HeaderPill keyModePill { HeaderPill::Icon::keyboard }, beatPill { HeaderPill::Icon::drum };
+    juce::TextButton arrangePrev, arrangeNext;   // step through ARRANJO
+    std::array<OptionLockButton, ChordCodeProProcessor::optionCount> optionLocks;
+    juce::ScrollBar chordScroll { false };
+    void scrollBarMoved(juce::ScrollBar*, double newRangeStart) override;
+    void updateAutoLabels();
     void showKeyModeMenu();
     void showBeatMenu();
     void updatePills();
-    SegmentedControl voicing, rhythm;
+    SegmentedControl voicing;
     juce::Slider velocity;
     std::array<ChordCardComponent, 8> cards;
     ContinueCard continueCard;
