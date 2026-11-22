@@ -1,7 +1,6 @@
 #include "PluginEditor.h"
 #include "ChordCodeTheme.h"
 #include "Core/MidiFile.h"
-#include "FigmaIcons.h"
 #include <cmath>
 
 using namespace ChordCodeTheme;
@@ -16,20 +15,10 @@ constexpr const char* windowScaleKey = "windowScale";
 constexpr int cardPageWidth = 1324;
 juce::String utf(const char* text) { return juce::String::fromUTF8(text); }
 
-std::unique_ptr<juce::Drawable> drawableFromSvg(const char* source) {
-    if (auto xml = juce::parseXML(source)) return juce::Drawable::createFromSVG(*xml);
-    return {};
-}
-
-void drawSvg(juce::Graphics& g, juce::Drawable* drawable, juce::Rectangle<float> bounds) {
-    if (drawable != nullptr)
-        drawable->drawWithin(g, bounds, juce::RectanglePlacement::centred, 1.0f);
-}
-
 template <typename Enum, typename Fn>
 void addNames(juce::ComboBox& box, Fn fn) {
     for (int i = 0; i < (int) Enum::count; ++i)
-        box.addItem(utf(fn((Enum) i)), i + 1);
+        box.addItem(AMUI::displayCase(utf(fn((Enum) i))), i + 1);   // values in normal case (Audio Makers UI)
 }
 
 void label(juce::Graphics& g, const char* text, int x, int y, int width) {
@@ -294,7 +283,7 @@ private:
             g.fillEllipse(juce::Rectangle<float>(4.0f, 4.0f).withCentre({ chip.getCentreX(), chip.getBottom() - 5.0f }));
         }
         g.setColour(isHover ? juce::Colour(0xff160904) : isCurrent ? juce::Colour(orangeLight) : juce::Colour(textPrimary));
-        g.setFont(font(14.0f, true));
+        g.setFont(semi(14.0));
         g.drawFittedText(text, chip.toNearestInt().reduced(6, 0), juce::Justification::centred, 1, 0.75f);
     }
 
@@ -304,7 +293,7 @@ private:
             g.setColour(juce::Colour(orange).withAlpha(0.14f));
             g.fillRoundedRectangle(pill, 12.0f);
             g.setColour(juce::Colour(orangeLight));
-            g.setFont(font(14.0f, true));
+            g.setFont(semi(14.0));
             g.drawText(pillText, pill, juce::Justification::centred);
         }
         g.setColour(juce::Colour(textSecondary));
@@ -444,9 +433,7 @@ void SegmentedControl::mouseUp(const juce::MouseEvent& e) {
     if (i >= 0 && i != selected) { setSelected(i); if (onSelect) onSelect(i); }
 }
 
-ChordCardComponent::ChordCardComponent()
-    : variationIcon(drawableFromSvg(FigmaIcons::variation_card)),
-      playIcon(drawableFromSvg(FigmaIcons::play_card)) {}
+ChordCardComponent::ChordCardComponent() = default;
 
 juce::Rectangle<float> ChordCardComponent::body() const { return getLocalBounds().toFloat().reduced(glowMargin); }
 juce::Rectangle<float> ChordCardComponent::playArea() const { auto b = body(); return { b.getRight() - 40.0f, b.getY() + 16.0f, 24.0f, 24.0f }; }
@@ -515,10 +502,10 @@ void ChordCardComponent::paint(juce::Graphics& g) {
 
     // Slot badge.
     auto badge = juce::Rectangle<float>(r.getX() + 16.0f, r.getY() + 16.0f, 36.0f, 24.0f);
-    g.setColour(active ? juce::Colour(orange).withAlpha(0.18f) : juce::Colour(0xff1d2127).withMultipliedAlpha(alpha));
-    g.fillRoundedRectangle(badge, 7.0f);
+    g.setColour(active ? juce::Colour(orange).withAlpha(0.18f) : juce::Colour(surfaceRaised).withMultipliedAlpha(alpha));
+    g.fillRoundedRectangle(badge, 8.0f);
     g.setColour(active ? juce::Colour(orangeLight) : juce::Colour(textSecondary).withMultipliedAlpha(alpha));
-    g.setFont(font(15.0f, true));
+    g.setFont(semi(15.0));
     g.drawText(juce::String(slot + 1).paddedLeft('0', 2), badge, juce::Justification::centred);
 
     if (available) {
@@ -528,21 +515,17 @@ void ChordCardComponent::paint(juce::Graphics& g) {
             g.setColour(recordRed.withAlpha(0.18f));
             g.fillRoundedRectangle(rec.expanded(4.0f), 7.0f);
         }
-        g.setColour(armed ? recordRed : juce::Colour(textSecondary));
-        g.drawEllipse(rec.reduced(3.0f), 1.6f);
-        g.setColour(armed ? recordRed.withAlpha(0.6f + 0.4f * pulse) : juce::Colour(textSecondary));
-        g.fillEllipse(rec.reduced(8.0f));
-        drawSvg(g, variationIcon.get(), variationArea());
+        const auto iconIdle = juce::Colour(textSecondary);
+        AMUI::drawIcon(g, AMUI::Icon::record, rec, armed ? recordRed.withAlpha(0.6f + 0.4f * pulse) : iconIdle);
+        AMUI::drawIcon(g, AMUI::Icon::variation, variationArea().withSizeKeepingCentre(22.0f, 22.0f), iconIdle);
         if (locked) {
             g.setColour(juce::Colour(orange).withAlpha(0.16f));
-            g.fillRoundedRectangle(lockArea().expanded(4.0f), 7.0f);
+            g.fillRoundedRectangle(lockArea().expanded(4.0f), 8.0f);
         }
-        drawLockIcon(g, lockArea(), locked ? juce::Colour(orange) : juce::Colour(textSecondary), locked);
-        if (activeLevel > 0.01f) {
-            g.setOpacity(activeLevel);
-            drawSvg(g, playIcon.get(), playArea());
-            g.setOpacity(1.0f);
-        }
+        AMUI::drawIcon(g, locked ? AMUI::Icon::lock : AMUI::Icon::unlock, lockArea().withSizeKeepingCentre(22.0f, 22.0f),
+                       locked ? juce::Colour(orange) : iconIdle);
+        if (activeLevel > 0.01f)
+            AMUI::drawIcon(g, AMUI::Icon::play, playArea().withSizeKeepingCentre(22.0f, 22.0f), juce::Colour(textPrimary).withAlpha(activeLevel));
     }
 
     // Chord name, gently lifting when hovered or playing.
@@ -555,8 +538,8 @@ void ChordCardComponent::paint(juce::Graphics& g) {
 
     if (available) {
         const auto numeral = romanNumeral(chord, keyRoot);
-        g.setFont(font(17.0f, true));
-        const float numeralWidth = (float) juce::GlyphArrangement::getStringWidthInt(font(17.0f, true), numeral) + 18.0f;
+        g.setFont(semi(17.0));
+        const float numeralWidth = (float) juce::GlyphArrangement::getStringWidthInt(semi(17.0), numeral) + 18.0f;
         const auto notes = chordNotes(chord);
         const auto notesFont = font(16.0f, false);
         const float notesWidth = (float) juce::GlyphArrangement::getStringWidthInt(notesFont, notes);
@@ -564,7 +547,7 @@ void ChordCardComponent::paint(juce::Graphics& g) {
         auto row = juce::Rectangle<float>(rowWidth, 26.0f).withCentre({ r.getCentreX(), r.getY() + 146.0f - lift * 0.5f });
         auto pill = row.removeFromLeft(numeralWidth);
         g.setColour(juce::Colour(orange).withAlpha(0.12f + 0.10f * activeLevel));
-        g.fillRoundedRectangle(pill, 13.0f);
+        g.fillRoundedRectangle(pill, 8.0f);
         g.setColour(juce::Colour(orangeLight));
         g.drawText(numeral, pill, juce::Justification::centred);
         row.removeFromLeft(10.0f);
@@ -696,23 +679,22 @@ void ContinueCard::paintButton(juce::Graphics& g, bool over, bool down) {
         g.setGradientFill(accentGradient(circle));
         g.fillEllipse(circle);
     } else {
-        g.setColour(juce::Colour(0xff1d2127));
+        g.setColour(juce::Colour(surfaceRaised));
         g.fillEllipse(circle);
         g.setColour(juce::Colour(borderStrong));
         g.drawEllipse(circle, 1.0f);
     }
-    g.setColour(over ? juce::Colour(0xff160904) : juce::Colour(textPrimary));
-    const auto c = circle.getCentre();
-    g.drawLine(c.x - 9.0f, c.y, c.x + 9.0f, c.y, 2.4f);
-    if (!backMode) g.drawLine(c.x, c.y - 9.0f, c.x, c.y + 9.0f, 2.4f);
+    const auto plusColour = over ? juce::Colour(0xff1a0a02) : juce::Colour(textPrimary);
+    if (backMode) { g.setColour(plusColour); g.drawLine(circle.getCentreX() - 9.0f, circle.getCentreY(), circle.getCentreX() + 9.0f, circle.getCentreY(), 2.4f); }
+    else AMUI::drawIcon(g, AMUI::Icon::plus, circle.withSizeKeepingCentre(26.0f, 26.0f), plusColour);
 
     g.setColour(juce::Colour(textPrimary));
     g.setFont(labelFont(16.0f));
     g.drawFittedText(backMode ? "VOLTAR A 4" : "CONTINUAR", 8, 138, getWidth() - 16, 24,
                      juce::Justification::centred, 1);
     g.setColour(juce::Colour(textSecondary));
-    g.setFont(labelFont(13.0f));
-    g.drawFittedText(backMode ? "REMOVER 4" : "+4 ACORDES", 8, 162, getWidth() - 16, 20,
+    g.setFont(font(14.0f));
+    g.drawFittedText(backMode ? "Remover 4" : "+4 acordes", 8, 162, getWidth() - 16, 20,
                      juce::Justification::centred, 1);
 }
 
@@ -735,49 +717,26 @@ void StatusPill::paint(juce::Graphics& g) {
     g.setColour(live ? juce::Colour(orange) : juce::Colour(textQuiet));
     g.fillEllipse(dot);
     g.setColour(juce::Colour(textSecondary));
-    g.setFont(labelFont(14.0f));
+    g.setFont(buttonFont(13.0f));
     g.drawFittedText(text, r.withTrimmedLeft(34.0f).withTrimmedRight(14.0f).toNearestInt(), juce::Justification::centredLeft, 1);
 }
 
 void HeaderPill::paint(juce::Graphics& g) {
     auto r = getLocalBounds().toFloat().reduced(0.5f);
     const bool over = isMouseOver(true);
+    const float radius = radiusControl;
     g.setColour(on ? juce::Colour(orange).withAlpha(over ? 0.22f : 0.14f) : over ? juce::Colour(surfaceHover) : juce::Colour(surface));
-    g.fillRoundedRectangle(r, r.getHeight() * 0.5f);
+    g.fillRoundedRectangle(r, radius);
     g.setColour(on ? juce::Colour(orange).withAlpha(0.8f) : over ? juce::Colour(orange).withAlpha(0.6f) : juce::Colour(border));
-    g.drawRoundedRectangle(r, r.getHeight() * 0.5f, 1.0f);
+    g.drawRoundedRectangle(r, radius, 1.0f);
     const auto ink = on ? juce::Colour(orangeLight) : juce::Colour(textSecondary);
+    const auto glyph = juce::Rectangle<float>(r.getX() + 14.0f, r.getCentreY() - 10.0f, 20.0f, 20.0f);
+    AMUI::drawIcon(g, icon == Icon::piano ? AMUI::Icon::piano : icon == Icon::keyboard ? AMUI::Icon::midi : AMUI::Icon::drum, glyph, ink);
     g.setColour(ink);
-    auto glyph = juce::Rectangle<float>(r.getX() + 14.0f, r.getCentreY() - 7.0f, 22.0f, 14.0f);
-    if (icon == Icon::piano) {
-        // Keys with one pressed.
-        g.drawRoundedRectangle(glyph, 2.0f, 1.2f);
-        for (int i = 1; i < 4; ++i) g.drawVerticalLine((int) (glyph.getX() + glyph.getWidth() * (float) i / 4.0f), glyph.getY(), glyph.getBottom());
-        g.fillRect(glyph.getX() + glyph.getWidth() * 0.25f + 1.0f, glyph.getY() + 1.0f, glyph.getWidth() * 0.25f - 1.0f, glyph.getHeight() - 2.0f);
-        g.setFont(labelFont(13.0f));
-        g.drawFittedText(text, r.withTrimmedLeft(44.0f).withTrimmedRight(12.0f).toNearestInt(), juce::Justification::centredLeft, 1);
-        return;
-    }
-    if (icon == Icon::keyboard) {
-        g.drawRoundedRectangle(glyph, 2.0f, 1.2f);
-        for (int i = 1; i < 4; ++i) g.drawVerticalLine((int) (glyph.getX() + glyph.getWidth() * (float) i / 4.0f), glyph.getY(), glyph.getBottom());
-        for (int i : { 1, 2 }) g.fillRect(glyph.getX() + glyph.getWidth() * (float) i / 4.0f - 2.0f, glyph.getY(), 4.0f, glyph.getHeight() * 0.55f);
-    } else {
-        // Drum: a shell with two sticks.
-        auto shell = glyph.withTrimmedTop(4.0f).reduced(2.0f, 0.0f);
-        g.drawEllipse(shell.withHeight(5.0f), 1.2f);
-        g.drawLine(shell.getX(), shell.getY() + 2.5f, shell.getX(), shell.getBottom(), 1.2f);
-        g.drawLine(shell.getRight(), shell.getY() + 2.5f, shell.getRight(), shell.getBottom(), 1.2f);
-        g.drawLine(shell.getX(), shell.getBottom(), shell.getRight(), shell.getBottom(), 1.2f);
-        g.drawLine(glyph.getX() + 4.0f, glyph.getY(), glyph.getCentreX(), glyph.getY() + 5.0f, 1.2f);
-        g.drawLine(glyph.getRight() - 4.0f, glyph.getY(), glyph.getCentreX(), glyph.getY() + 5.0f, 1.2f);
-    }
-    g.setFont(labelFont(13.0f));
-    g.drawFittedText(text, r.withTrimmedLeft(44.0f).withTrimmedRight(26.0f).toNearestInt(), juce::Justification::centredLeft, 1);
-    juce::Path arrow;
-    const auto c = juce::Point<float>(r.getRight() - 16.0f, r.getCentreY());
-    arrow.startNewSubPath(c.x - 4.0f, c.y - 2.0f); arrow.lineTo(c.x, c.y + 2.0f); arrow.lineTo(c.x + 4.0f, c.y - 2.0f);
-    g.strokePath(arrow, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setFont(buttonFont(13.0f));
+    const bool menu = icon != Icon::piano;
+    g.drawFittedText(text, r.withTrimmedLeft(44.0f).withTrimmedRight(menu ? 34.0f : 12.0f).toNearestInt(), juce::Justification::centredLeft, 1);
+    if (menu) AMUI::drawIcon(g, AMUI::Icon::chevron, { r.getRight() - 30.0f, r.getCentreY() - 8.0f, 16.0f, 16.0f }, ink);
 }
 
 ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcessorEditor(&p), pro(p) {
@@ -807,13 +766,13 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     addNames<ccp::Voicing>(voicingParameter, ccp::voicingName);
     rhythmParameter.addItemList({ "RETO", "HUMANIZE", "STRUM", "ARPEJO" }, 1);
     length.addItemList({ "1/4", "2/4", "4/4" }, 1);
-    groove.addItemList({ "IGUAL", "LONGO-CURTO", "CURTO-LONGO" }, 1);
+    groove.addItemList({ "Igual", "Longo-curto", "Curto-longo" }, 1);
     groove.setJustificationType(juce::Justification::centredLeft);
     groove.setRepaintsOnMouseActivity(true);
     groove.setTooltip(utf("Alterna a duração dos acordes em pares: um mais longo e outro mais curto."));
     grooveAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(p.apvts, "groove", groove);
     content.addAndMakeVisible(groove);
-    groove.onChange = [this] { pro.stopPreview(); updateStatus(); };
+    groove.onChange = [this] { pro.restartIfPlaying(); updateStatus(); };
 
     std::array<juce::ComboBox*, 10> boxes { &key, &scale, &style, &mood, &complexity, &tension, &timbre,
                                             &voicingParameter, &rhythmParameter, &length };
@@ -846,7 +805,19 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     key.onChange = [this] { if (!ignore) { pro.setKey(key.getSelectedItemIndex()); refresh(); } };
     for (auto* box : { &scale, &style, &mood, &complexity, &tension, &voicingParameter })
         box->onChange = [this] { if (!ignore) { pro.rebuildForSettings(); refresh(); } };
-    timbre.onChange = [this] { pro.stopPreview(); updateTimbreTooltip(); };
+    timbre.onChange = [this] { pro.restartIfPlaying(); updateTimbreTooltip(); };
+    timbrePrev.setComponentID("prev"); timbreNext.setComponentID("next");
+    for (auto* b : { &timbrePrev, &timbreNext }) {
+        b->setMouseCursor(juce::MouseCursor::PointingHandCursor);
+        b->setTooltip(utf("Timbre anterior / próximo"));
+        content.addAndMakeVisible(b);
+    }
+    const auto stepTimbre = [this](int d) {
+        const int n = timbre.getNumItems();
+        if (n > 0) timbre.setSelectedItemIndex(((timbre.getSelectedItemIndex() + d) % n + n) % n, juce::sendNotificationSync);
+    };
+    timbrePrev.onClick = [stepTimbre] { stepTimbre(-1); };
+    timbreNext.onClick = [stepTimbre] { stepTimbre(1); };
 
     content.addAndMakeVisible(cardsViewport);
     cardsViewport.setInterceptsMouseClicks(false, true);
@@ -885,7 +856,7 @@ ChordCodeProEditor::ChordCodeProEditor(ChordCodeProProcessor& p) : AudioProcesso
     dragWav.setButtonText("ARRASTAR WAV");
 
     settings.onClick = [this] { showSettings(); };
-    play.onClick = [this] { if (pro.activeChord() >= 0) pro.stopPreview(); else pro.playSequence(); };
+    play.onClick = [this] { if (pro.isSequencePlaying() || pro.activeChord() >= 0) pro.stopPreview(); else pro.playSequence(); };
     variation.onClick = [this] { pro.variation(); refresh(); };
     random.onClick = [this] {
         ignore = true;
@@ -1026,16 +997,13 @@ void ChordCodeProEditor::paint(juce::Graphics& g) {
     auto mark = juce::Rectangle<float>(34.0f, 26.0f, 38.0f, 38.0f);
     g.setGradientFill(accentGradient(mark));
     g.fillRoundedRectangle(mark, 10.0f);
-    g.setColour(juce::Colour(0xff160904));
-    static constexpr float markBars[] { 10.0f, 20.0f, 14.0f, 24.0f };
-    for (int i = 0; i < 4; ++i)
-        g.fillRoundedRectangle(mark.getX() + 8.0f + (float) i * 6.5f, mark.getCentreY() - markBars[i] * 0.5f, 3.5f, markBars[i], 1.75f);
+    AMUI::drawIcon(g, AMUI::Icon::bars, mark.withSizeKeepingCentre(26.0f, 26.0f), juce::Colour(0xff1a0a02));
 
-    const auto logoFont = font(38.0f, true).withExtraKerningFactor(0.02f);
+    const auto logoFont = font(32.0f, true).withExtraKerningFactor(0.01f);
     g.setFont(logoFont);
     g.setColour(juce::Colour(textPrimary));
-    g.drawText("CHORD", 84, 20, 170, 50, juce::Justification::centredLeft);
-    const int codeX = 84 + juce::GlyphArrangement::getStringWidthInt(logoFont, "CHORD") + 9;
+    g.drawText("CHORD", 86, 20, 170, 50, juce::Justification::centredLeft);
+    const int codeX = 86 + juce::GlyphArrangement::getStringWidthInt(logoFont, "CHORD") + 8;
     const auto codeArea = juce::Rectangle<float>((float) codeX, 20.0f, 130.0f, 50.0f);
     g.setGradientFill(juce::ColourGradient(juce::Colour(orange), codeArea.getX(), 0.0f,
                                            juce::Colour(amber), codeArea.getRight(), 0.0f, false));
@@ -1063,10 +1031,6 @@ void ChordCodeProEditor::paint(juce::Graphics& g) {
     label(g, "FORMA DO ACORDE", 55, 625, 220); label(g, "RITMO", 525, 625, 180);
     label(g, "DURAÇÃO", 981, 625, 120); label(g, "ALTERNÂNCIA", 1113, 625, 200); label(g, "VOLUME", 1327, 625, 160);
 
-    // Warm glow under the primary action.
-    juce::Path generateShape;
-    generateShape.addRoundedRectangle(generate.getBounds().toFloat().reduced(6.0f, 4.0f).translated(0.0f, 6.0f), 14.0f);
-    drawGlow(g, generateShape, juce::Colour(orange).withAlpha(0.55f), 26);
 }
 
 void ChordCodeProEditor::resized() {
@@ -1074,17 +1038,20 @@ void ChordCodeProEditor::resized() {
     if (auto* panel = overlay.getPanel()) overlay.setPanelScale(panelScaleFor(*panel));
     content.setBounds(0, 0, designWidth, designHeight);
     content.setTransform(juce::AffineTransform::scale(uiScale()));
-    settings.setBounds(1465, 29, 38, 38);
+    settings.setBounds(1450, 24, 50, 50);
     key.setBounds(34, 140, 320, 50); scale.setBounds(396, 140, 330, 50);
     style.setBounds(768, 140, 330, 50); mood.setBounds(1130, 140, 370, 50);
     complexity.setBounds(34, 242, 460, 50); tension.setBounds(504, 242, 450, 50); timbre.setBounds(964, 242, 536, 50);
+    timbreNext.setBounds(timbre.getRight() - 52 - 38, timbre.getY() + 7, 36, 36);
+    timbrePrev.setBounds(timbre.getRight() - 52 - 78, timbre.getY() + 7, 36, 36);
 
     const int margin = (int) ChordCardComponent::glowMargin;
     cardsViewport.setBounds(34 - margin, 332 - margin, 1288 + margin * 2, 252 + margin * 2);
-    status.setBounds(1038, 30, 407, 32);
-    beatPill.setBounds(340, 30, 226, 32);
-    keyModePill.setBounds(578, 30, 316, 32);
-    pianoPill.setBounds(906, 30, 120, 32);
+    // header, right-aligned: beat, keyboard, piano, summary, settings
+    beatPill.setBounds(470, 27, 236, 44);
+    keyModePill.setBounds(718, 27, 236, 44);
+    pianoPill.setBounds(966, 27, 120, 44);
+    status.setBounds(1098, 27, 340, 44);
     layoutChordPages();
     continueCard.setBounds(1358, 332, 142, 252);
 
@@ -1094,10 +1061,10 @@ void ChordCodeProEditor::resized() {
     groove.setBounds(1113, 655, 202, 48);
     velocity.setBounds(1323, 647, 166, 64);
 
-    play.setBounds(34, 758, 160, 84); variation.setBounds(204, 758, 166, 84);
-    random.setBounds(380, 758, 168, 84); generate.setBounds(558, 757, 240, 84);
-    history.setBounds(808, 758, 156, 84); drag.setBounds(974, 758, 181, 84);
-    dragWav.setBounds(1165, 758, 181, 84); save.setBounds(1356, 758, 144, 84);
+    play.setBounds(34, 762, 160, 76); variation.setBounds(204, 762, 166, 76);
+    random.setBounds(380, 762, 168, 76); generate.setBounds(558, 762, 240, 76);
+    history.setBounds(808, 762, 156, 76); drag.setBounds(974, 762, 181, 76);
+    dragWav.setBounds(1165, 762, 181, 76); save.setBounds(1356, 762, 144, 76);
 }
 
 float ChordCodeProEditor::uiScale() const {
@@ -1143,7 +1110,7 @@ void ChordCodeProEditor::timerCallback() {
     if (++licenseTicks >= 30 * 60) { licenseTicks = 0; license->revalidate(); }
     if (now != lastPlaying) {
         lastPlaying = now;
-        play.setButtonText(now >= 0 ? "PARAR" : "REPRODUZIR");
+        play.setButtonText(now >= 0 || pro.isSequencePlaying() ? "PARAR" : "OUVIR");
     }
 
     if (std::abs(slidePosition - slideTarget) > 0.001f) {
@@ -1222,7 +1189,7 @@ void ChordCodeProEditor::refresh() {
 
 void ChordCodeProEditor::updateStatus() {
     const auto progression = pro.getProgression();
-    status.setText(key.getText() + " " + scale.getText() + utf("  ·  ") + juce::String(progression.chordCount)
+    status.setText(key.getText() + " " + utf(ccp::scaleName(progression.settings.scale)) + utf("  ·  ") + juce::String(progression.chordCount)
                    + utf(" ACORDES  ·  ") + juce::String(juce::roundToInt(pro.hostBpm())) + " BPM");
 }
 
@@ -1391,11 +1358,11 @@ void ChordCodeProEditor::showBeatMenu() {
     juce::PopupMenu menu;
     menu.setLookAndFeel(&laf);
     const int current = (int) *pro.apvts.getRawParameterValue("beat");
-    menu.addSectionHeader(utf("BATIDA DE REFERÊNCIA (TOCA NO REPRODUZIR)"));
+    menu.addSectionHeader(utf("BATIDA DE REFERÊNCIA (TOCA NO OUVIR)"));
     for (int i = 0; i < DrumMachine::patternCount; ++i)
         menu.addItem(i + 1, utf(DrumMachine::patternName(i)), true, current == i);
     menu.addSeparator();
-    menu.addItem(100, utf("Com batida, o REPRODUZIR fica em loop. Não vai no MIDI nem no WAV."), false);
+    menu.addItem(100, utf("A batida toca junto com o OUVIR. Não vai no MIDI nem no WAV."), false);
     juce::Component::SafePointer<ChordCodeProEditor> safe(this);
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(beatPill).withParentComponent(this),
         [safe](int result) {

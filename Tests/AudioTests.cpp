@@ -96,7 +96,13 @@ int main(int argc, char** argv) {
             require(noteOns == expected, "MIDI export omitted chords");
             processor.playSequence();
             for (int block = 0; block < (count * 48000 / blockSize) + 600; ++block) processor.processBlock(audio, midi);
-            require(processor.activeChord() == -1, "Sequence did not stop");
+            require(processor.activeChord() >= 0 && processor.isSequencePlaying(), "Sequence should loop until stopped");
+            // a new progression restarts the loop from the first chord
+            processor.generate(); processor.processBlock(audio, midi);
+            require(processor.activeChord() == 0 && processor.isSequencePlaying(), "New chords should restart the loop");
+            processor.stopPreview();
+            for (int block = 0; block < 600; ++block) processor.processBlock(audio, midi);
+            require(processor.activeChord() == -1 && !processor.isSequencePlaying(), "Sequence did not stop");
         }
         // WAV export: valid 24-bit stereo file, exactly one loop long, normalised, every timbre and rhythm.
         processor.setChordCount(4);

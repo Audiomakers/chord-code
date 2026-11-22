@@ -115,7 +115,8 @@ ccp::Progression ChordCodeProProcessor::getProgression() const {
 }
 
 void ChordCodeProProcessor::publish(const ccp::Progression& p, bool addHistory) {
-    stopPreview();
+    // the loop keeps going with the new chords, from the top (Ed, 22/11); otherwise just silence any audition
+    if (sequenceRunning.load()) playSequence(); else stopPreview();
     if (addHistory) {
         const auto old = getProgression();
         if (old.identity != 0 && old.identity != p.identity) {
@@ -370,6 +371,8 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
     const int cmd = command.exchange(0);
     auto p = getProgression();
 
+    if (cmd == -1 || cmd >= 10) sequenceRunning = false;
+    if (cmd == 1) sequenceRunning = true;
     if (cmd == -1) {
         synth.allNotesOff();
         playing = -1;
@@ -433,8 +436,8 @@ void ChordCodeProProcessor::processBlock(juce::AudioBuffer<float>& b, juce::Midi
             playheadSamples = blockEnd;
         } else {
             const int64_t total = juce::jmax<int64_t>(1, chordStartSamples(options, p.chordCount, sr));
-            // With a reference beat on, REPRODUZIR loops until stopped.
-            const bool loop = beat > 0;
+            // REPRODUZIR always loops until PARAR (with or without the reference beat).
+            const bool loop = true;
             const bool wraps = loop && blockEnd > total;
             for (int64_t pass : { (int64_t) 0, total }) {
                 if (pass > 0 && !wraps) break;
@@ -775,7 +778,7 @@ bool ChordCodeProProcessor::applyPendingCapture() {
 }
 
 void ChordCodeProProcessor::playSequence() { command.store(1); }
-void ChordCodeProProcessor::stopPreview() { command.store(-1); }
+void ChordCodeProProcessor::stopPreview() { sequenceRunning = false; command.store(-1); }
 void ChordCodeProProcessor::audition(int i) { command.store(10 + juce::jlimit(0, ccp::maxChords - 1, i)); }
 
 void ChordCodeProProcessor::persistProgression() {

@@ -21,8 +21,17 @@ juce::Font font(float height, bool bold) {
     return juce::Font(juce::FontOptions(bold ? boldTypeface() : regularTypeface()).withHeight(height));
 }
 
+juce::Font semi(float height) {
+    static auto face = juce::Typeface::createSystemTypefaceFor(EmbeddedFonts::interSemiBold, EmbeddedFonts::interSemiBoldSize);
+    return juce::Font(juce::FontOptions(face).withHeight(height));
+}
+
 juce::Font labelFont(float height) {
-    return font(height, true).withExtraKerningFactor(0.08f);
+    return semi(height).withExtraKerningFactor(AMUI::kerningLabel);
+}
+
+juce::Font buttonFont(float height) {
+    return semi(height).withExtraKerningFactor(AMUI::kerningButton);
 }
 
 juce::ColourGradient accentGradient(juce::Rectangle<float> r) {

@@ -78,7 +78,7 @@ private:
     bool isOver(juce::Rectangle<float> r) const { return r.contains(mouse); }
 
     Model model;
-    PanelButton updates { juce::String::fromUTF8("Verificar atualizações"), false };
+    PanelButton updates { juce::String::fromUTF8("VERIFICAR ATUALIZAÇÕES"), false };
     std::array<juce::Rectangle<float>, 8> bpmAreas {};
     std::array<juce::Rectangle<float>, 5> scaleAreas {};
     juce::Point<float> mouse { -1.0f, -1.0f };
@@ -101,7 +101,7 @@ private:
     State state { State::checking };
     Info info;
     float spin {};
-    PanelButton primary { "OK", true }, secondary { juce::String::fromUTF8("Agora não"), false };
+    PanelButton primary { "OK", true }, secondary { juce::String::fromUTF8("AGORA NÃO"), false };
 };
 
 class LicensePanel final : public juce::Component {
@@ -124,5 +124,10 @@ private:
     juce::String email, message;
     bool busy {}, failed {};
     juce::TextEditor field;
-    PanelButton activate { "Ativar", true }, cancel { "Cancelar", false };
+    PanelButton activate { "ATIVAR", true }, cancel { "CANCELAR", false };
+    bool closeHover {};
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
+    void mouseUp(const juce::MouseEvent&) override;
+    juce::Rectangle<float> closeArea() const { return { (float) getWidth() - 44.0f, 16.0f, 28.0f, 28.0f }; }
 };
