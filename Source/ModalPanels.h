@@ -123,7 +123,7 @@ private:
     Mode mode;
     juce::String email, message;
     bool busy {}, failed {};
-    juce::TextEditor field;
+    juce::TextEditor field, confirm;   // e-mail and its confirmation (typed twice, must match)
     PanelButton activate { "ATIVAR", true }, cancel { "CANCELAR", false };
     bool closeHover {};
     void mouseMove(const juce::MouseEvent&) override;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(ChordCodePro VERSION 1.3.0 LANGUAGES C CXX)
+project(ChordCodePro VERSION 1.4.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(APPLE)
@@ -15,6 +15,7 @@ endif()
 add_library(chordcode_pro_core STATIC Source/Core/Music.cpp Source/Core/Music.h Source/Core/MidiFile.cpp Source/Core/MidiFile.h)
 target_include_directories(chordcode_pro_core PUBLIC Source)
 target_compile_features(chordcode_pro_core PUBLIC cxx_std_20)
+set_target_properties(chordcode_pro_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(TARGET juce::juce_audio_utils)
  if(WIN32)
   if(juce_SOURCE_DIR)
@@ -28,9 +29,6 @@ if(TARGET juce::juce_audio_utils)
  file(GLOB CCP_PIANO CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Assets/Piano/*.ogg")
  file(GLOB CCP_DRUMS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Assets/Drums/*.wav")
  juce_add_binary_data(ChordCodeProSamples SOURCES
-  Assets/Samples/violin_F4.wav
-  Assets/Samples/pad_C4.wav
-  Assets/Samples/flute_Fsharp4.wav
   ${CCP_PIANO} ${CCP_DRUMS})
  set(CCP_PLUGIN_FORMATS VST3)
  if(APPLE)
@@ -65,6 +63,7 @@ if(TARGET juce::juce_audio_utils)
   Source/License.cpp Source/License.h
   Source/ModalPanels.cpp Source/ModalPanels.h
   Source/PreviewSynth.cpp Source/PreviewSynth.h
+  Source/Synth.cpp Source/Synth.h Source/Tone.cpp Source/Tone.h Source/Sets.cpp Source/Sets.h
   Source/DrumMachine.cpp Source/DrumMachine.h
   Source/LookAndFeel.cpp Source/LookAndFeel.h
   Source/ChordCodeTheme.cpp Source/ChordCodeTheme.h

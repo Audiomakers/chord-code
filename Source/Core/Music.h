@@ -8,17 +8,20 @@
 
 namespace ccp {
 constexpr int maxChords=8;
+constexpr int maxNotes=10;   // bass + upper voicing; MUITO RICO uses up to 9
 enum class ScaleType { major, naturalMinor, harmonicMinor, melodicMinor, dorian, phrygian, lydian, mixolydian, phrygianDominant, count };
 enum class Style { standard, pop, trap, hipHop, rnb, edm, house, loFi, phonk, indie, funkBrasileiro, latin, cinematic, jazz, count };
 enum class Mood { standard, melancholic, emotional, atmospheric, fun, dark, romantic, nostalgic, hopeful, mysterious, tense, epic, aggressive, count };
-enum class Complexity { simple, colorful, rich, automatic, count };
+// FULL (MUITO RICO) adds low octave/fifth and high doublings; sessions saved before it had automatic at 3.
+enum class Complexity { simple, colorful, rich, full, automatic, count };
 enum class Tension { standard, soft, medium, high, count };
 enum class Voicing { standard, closed, open, inverted, count };
-// Order is the menu order; sessions saved before 1.3 had piano last (see setStateInformation).
-enum class Timbre { piano, electricPiano, synthSaw, organ, atmosphericPad, violin, flute, count };
+// Order is the menu order (Ed's picks, 22/11). Sessions saved before had the old 7 timbres (see setStateInformation).
+enum class Timbre { piano, pianoCinema, pianoLofi, rhodes, rhodesSuitcase, wurlitzer, fmPiano, vibraphone, houseOrgan, organ,
+ strings, orchestra, brass, darkPad, junoPad, atmosPad, synthwave, supersaw, sawStab, count };
 enum class ChordKind { triad, seventh, ninth, add9, sus2, sus4, dominant7, sixth, minorMajor7, sixthNinth, eleventh, count };
 
-struct Chord { int degree{};int root{};ChordKind kind{ChordKind::triad};std::array<int,5> notes{};int noteCount{3};int velocity{88};std::string name;int quality{-1}; };
+struct Chord { int degree{};int root{};ChordKind kind{ChordKind::triad};std::array<int,maxNotes> notes{};int noteCount{3};int velocity{88};std::string name;int quality{-1}; };
 // Chromatic chords (any root, outside the scale) carry a quality index; diatonic chords keep quality -1.
 constexpr int chromaticQualityCount=15;
 const char* chromaticQualitySuffix(int quality);
@@ -32,6 +35,8 @@ public:
  static Chord buildChromaticChord(const GenerationSettings&,int root,int quality,const Chord* previous=nullptr,int position=0);
  // Rebuilds a chord with new voice leading, keeping whether it is diatonic or chromatic.
  static Chord rebuild(const GenerationSettings&,const Chord&,const Chord* previous=nullptr,int position=0);
+ // Resolved complexity (AUTOMÁTICO picks by style and mood).
+ static Complexity resolve(const GenerationSettings&);
  static Progression transpose(const Progression&,int);static bool valid(const Progression&);static bool nameMatches(const Chord&);static int movement(const Chord&,const Chord&);
 };
 class ProgressionGenerator {

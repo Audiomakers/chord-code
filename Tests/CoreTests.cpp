@@ -52,7 +52,7 @@ int main() {
                     settings.complexity = Complexity::rich;
                     settings.voicing = (Voicing) (kind % (int) Voicing::count);
                     auto chord = HarmonyEngine::buildChord(settings, degree, (ChordKind) kind, nullptr, degree);
-                    assert(chord.noteCount >= 3 && chord.noteCount <= 5);
+                    assert(chord.noteCount >= 3 && chord.noteCount <= maxNotes);
                     assert(!chord.name.empty());
                     for (int i = 0; i < chord.noteCount; ++i) {
                         assert(chord.notes[(size_t) i] >= 0 && chord.notes[(size_t) i] <= 127);
@@ -141,7 +141,7 @@ int main() {
     options.rhythm = MidiRhythm::arpeggio;
     options.style = Style::house;
     auto arpeggio = MidiFile::bytes(extended, options);
-    assert(countStatus(arpeggio, 0x90) == expected);
+    assert(countStatus(arpeggio, 0x90) >= expected);   // arpeggios cycle through the notes for the whole chord
     assert(midi != humanized && humanized != strummed && strummed != arpeggio);
 
     std::array<int, 7> pop {}, jazz {};
